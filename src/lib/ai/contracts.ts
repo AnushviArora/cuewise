@@ -4,16 +4,37 @@
  * ./client.ts from the matching tab. Types here are the seam between them.
  * This file must stay free of secrets and server-only imports.
  */
-import type { CaptionCue } from "../captions/types";
+import type { CaptionCue, CaptionEdit, SlideTerm } from "../captions/types";
 
 export interface ApiError {
   error: string;
   message: string;
 }
 
-/** POST /api/transcribe — lecture audio → timed captions. */
+/**
+ * POST /api/transcribe — multipart: `audio` (WAV chunk), optional `courseName`.
+ * Cue times are relative to the chunk; the browser adds the chunk's offset.
+ */
 export interface TranscribeResponse {
+  cues: { start: number; end: number; text: string }[];
+}
+
+/** POST /api/slides — multipart: `slides` (PDF), `courseName`. */
+export interface SlidesResponse {
+  terms: SlideTerm[];
+  /** False when the PDF had no extractable text (e.g. scanned images). */
+  readable: boolean;
+}
+
+/** POST /api/correct — check a batch of cues against slide terms. */
+export interface CorrectRequest {
+  courseName: string;
+  terms: SlideTerm[];
   cues: CaptionCue[];
+}
+/** Validated edits (without ids); the browser applies them to the cues. */
+export interface CorrectResponse {
+  edits: Omit<CaptionEdit, "id">[];
 }
 
 /** POST /api/review — find likely-wrong terms (names, jargon) in captions. */

@@ -114,7 +114,7 @@ export function UploadForm() {
           <FileDropzone
             label="Lecture slides"
             optional
-            hint="PDF, up to 50 MB. Helps later with spelling technical terms."
+            hint="PDF, up to 50 MB. Used to fix names and technical terms in the captions."
             accept="application/pdf,.pdf"
             icon={<FileIcon />}
             file={slides}
@@ -127,7 +127,7 @@ export function UploadForm() {
 
           <div className="flex flex-col-reverse items-stretch gap-4 pt-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs leading-relaxed text-subtle">
-              Files stay in your browser for now. Nothing is uploaded to a server.
+              Your video stays in your browser. Only its audio and your slides’ text are sent to OpenAI to make captions.
             </p>
             <Button type="submit">
               Open workspace <ArrowRightIcon width={18} height={18} />

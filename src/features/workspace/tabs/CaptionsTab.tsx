@@ -8,7 +8,11 @@ import {
   FONT_SIZE_RANGE,
   INDENT_RANGE,
 } from "@/lib/captions/settings";
-import type { CaptionCue, CaptionPosition, CaptionSettings } from "@/lib/captions/types";
+import { summarize } from "@/lib/captions/corrections";
+import type { CaptionPosition, CaptionResult, CaptionSettings } from "@/lib/captions/types";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
+import type { PipelineState } from "@/features/captions/useCaptionPipeline";
 
 /** Tiny frame icon showing where the caption bar sits. */
 function PositionGlyph({ at }: { at: CaptionPosition }) {
@@ -21,18 +25,177 @@ function PositionGlyph({ at }: { at: CaptionPosition }) {
   );
 }
 
+const fmt = (t: number) => {
+  const m = Math.floor(t / 60);
+  const sec = Math.floor(t % 60).toString().padStart(2, "0");
+  return `${m}:${sec}`;
+};
+
 interface Props {
   settings: CaptionSettings;
   onChange: (next: CaptionSettings) => void;
-  cue: CaptionCue;
+  pipeline: PipelineState;
+  activeCueId: string | null;
+  onSeek: (seconds: number) => void;
 }
 
-export function CaptionsTab({ settings, onChange, cue }: Props) {
+const card = "rounded-2xl border border-white/10 bg-black/20 p-4";
+const Note = ({ children }: { children: React.ReactNode }) => (
+  <p className="mt-1.5 text-xs leading-relaxed text-muted">{children}</p>
+);
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+function Summary({ result }: { result: CaptionResult }) {
+  const { fixed, needsReview } = summarize(result.edits);
+
+  if (!result.hadSlides) {
+    return (
+      <div className={card}>
+        <p className="text-sm font-medium">Transcript ready</p>
+        <Note>
+          Adding your slides improves accuracy: Cuewise uses them to correct names and technical
+          terms.{" "}
+          <Link href="/" className="text-accent underline underline-offset-2">
+            Upload with slides
+          </Link>
+        </Note>
+      </div>
+    );
+  }
+  if (result.slidesError) {
+    return (
+      <div className={card}>
+        <p className="text-sm font-medium">Transcript ready, terms not checked</p>
+        <Note>{result.slidesError}</Note>
+      </div>
+    );
+  }
+  if (result.slidesUnreadable) {
+    return (
+      <div className={card}>
+        <p className="text-sm font-medium">Transcript ready</p>
+        <Note>
+          We couldn’t find readable text in your slides (scanned images?), so no terms were
+          checked. A text-based PDF export works best.
+        </Note>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-2xl border border-accent/30 bg-accent-soft p-4">
+      <p className="text-sm font-medium">
+        {fixed === 0 && needsReview === 0
+          ? "No slide terms needed fixing"
+          : `Fixed ${plural(fixed, "term")} using your slides${needsReview ? ` · ${needsReview} need${needsReview === 1 ? "s" : ""} review` : ""}`}
+      </p>
+      <Note>Checked against {plural(result.terms.length, "term")} from your slides.</Note>
+    </div>
+  );
+}
+
+function Transcript({
+  result,
+  activeCueId,
+  onSeek,
+}: {
+  result: CaptionResult;
+  activeCueId: string | null;
+  onSeek: (seconds: number) => void;
+}) {
+  const listRef = useRef<HTMLOListElement>(null);
+  const editById = new Map(result.edits.map((e) => [e.id, e]));
+
+  // Keep the current line visible, scrolling only this list (never the page).
+  useEffect(() => {
+    const list = listRef.current;
+    const el = activeCueId ? list?.querySelector<HTMLElement>(`[data-cue="${activeCueId}"]`) : null;
+    if (!list || !el) return;
+    const top = el.offsetTop - list.offsetTop;
+    if (top < list.scrollTop || top + el.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTo({ top: top - list.clientHeight / 3, behavior: "smooth" });
+    }
+  }, [activeCueId]);
+
+  return (
+    <ol
+      ref={listRef}
+      aria-label="Transcript"
+      className="relative max-h-72 space-y-0.5 overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-1.5"
+    >
+      {result.cues.map((cue) => {
+        const parts: React.ReactNode[] = [];
+        let at = 0;
+        for (const m of cue.marks ?? []) {
+          const edit = editById.get(m.editId);
+          if (!edit) continue;
+          parts.push(cue.text.slice(at, m.start));
+          const applied = edit.status === "applied";
+          parts.push(
+            <mark
+              key={m.start}
+              title={
+                applied
+                  ? `Corrected from “${edit.original}” to match “${edit.term}” in your slides`
+                  : `Might be “${edit.corrected}” (from your slides) — needs review`
+              }
+              className={`rounded px-0.5 text-inherit ${
+                applied
+                  ? "bg-accent/20 underline decoration-accent/60 decoration-1 underline-offset-2"
+                  : "bg-amber-300/15 underline decoration-amber-300/70 decoration-dotted underline-offset-2"
+              }`}
+            >
+              {cue.text.slice(m.start, m.end)}
+            </mark>,
+          );
+          at = m.end;
+        }
+        parts.push(cue.text.slice(at));
+        const active = cue.id === activeCueId;
+        return (
+          <li key={cue.id} data-cue={cue.id}>
+            <button
+              type="button"
+              onClick={() => onSeek(cue.start + 0.01)}
+              aria-current={active ? "true" : undefined}
+              aria-label={`Jump to ${fmt(cue.start)}`}
+              className={`flex w-full gap-3 rounded-xl px-3 py-2 text-left text-sm leading-relaxed transition-colors ${
+                active ? "bg-white/10 text-ink" : "text-muted hover:bg-white/[0.06] hover:text-ink"
+              }`}
+            >
+              <span className="mt-px w-9 shrink-0 text-xs tabular-nums text-subtle">{fmt(cue.start)}</span>
+              <span>{parts}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function CaptionsTab({ settings, onChange, pipeline, activeCueId, onSeek }: Props) {
   const set = <K extends keyof CaptionSettings>(key: K, value: CaptionSettings[K]) =>
     onChange({ ...settings, [key]: value });
 
   return (
     <div className="space-y-6">
+      {pipeline.status === "done" ? (
+        <section aria-label="Transcript" className="space-y-3">
+          <Summary result={pipeline.result} />
+          <Transcript result={pipeline.result} activeCueId={activeCueId} onSeek={onSeek} />
+          <p className="text-xs text-muted">
+            Select a line to jump there.{" "}
+            <span className="rounded bg-accent/20 px-1">Highlighted</span> words were corrected from
+            your slides; <span className="rounded bg-amber-300/15 px-1">dotted</span> ones need review.
+          </p>
+        </section>
+      ) : (
+        <p className={`${card} text-sm text-muted`}>
+          {pipeline.status === "error"
+            ? "Captions couldn’t be created. See the message above."
+            : "Your transcript will appear here as soon as it’s ready."}
+        </p>
+      )}
+
       <div>
         <h2 className="text-base font-semibold">Caption display</h2>
         <p className="mt-1 text-sm leading-relaxed text-muted">
@@ -89,14 +252,6 @@ export function CaptionsTab({ settings, onChange, cue }: Props) {
       <Button variant="ghost" className="w-full" onClick={() => onChange(DEFAULT_CAPTION_SETTINGS)}>
         Reset to defaults
       </Button>
-
-      <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-subtle">Sample caption</p>
-        <p className="mt-2 text-sm leading-relaxed text-ink">{cue.text}</p>
-        <p className="mt-2 text-xs text-muted">
-          Real captions will replace this once transcription is added.
-        </p>
-      </div>
     </div>
   );
 }

@@ -1,11 +1,10 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GlassPanel } from "@/components/ui/GlassPanel";
 import { ArrowRightIcon, FileIcon, UploadIcon } from "@/components/ui/Icons";
-import { SAMPLE_CUE } from "@/lib/captions/sample";
 import {
   DEFAULT_CAPTION_SETTINGS,
   loadSettings,
@@ -13,13 +12,19 @@ import {
 } from "@/lib/captions/settings";
 import type { CaptionSettings } from "@/lib/captions/types";
 import { useLecture } from "@/lib/lecture-context";
+import { ProcessingCard } from "../captions/ProcessingCard";
+import { useCaptionPipeline } from "../captions/useCaptionPipeline";
 import { SidePanel } from "./SidePanel";
-import { VideoPlayer } from "./VideoPlayer";
+import { VideoPlayer, type PlayerHandle } from "./VideoPlayer";
 
 export function Workspace() {
   const { lecture } = useLecture();
   const [settings, setSettings] = useState<CaptionSettings>(DEFAULT_CAPTION_SETTINGS);
   const hydrated = useRef(false);
+  const playerRef = useRef<PlayerHandle>(null);
+  const [activeCueId, setActiveCueId] = useState<string | null>(null);
+  const { state, retry } = useCaptionPipeline(lecture);
+  const cues = useMemo(() => (state.status === "done" ? state.result.cues : []), [state]);
 
   // Restore saved display preferences once, then persist every change.
   useEffect(() => {
@@ -78,6 +83,14 @@ export function Workspace() {
         </Link>
       </motion.header>
 
+      <AnimatePresence>
+        {state.status !== "done" && (
+          <div className="mb-6" key="progress">
+            <ProcessingCard state={state} hasSlides={!!lecture.slides} onRetry={retry} />
+          </div>
+        )}
+      </AnimatePresence>
+
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]">
         <motion.section
           aria-label="Lecture video"
@@ -88,8 +101,10 @@ export function Workspace() {
           <VideoPlayer
             src={lecture.videoUrl}
             title={lecture.courseName}
-            cue={SAMPLE_CUE}
+            ref={playerRef}
+            cues={cues}
             settings={settings}
+            onActiveCueChange={setActiveCueId}
           />
         </motion.section>
 
@@ -100,7 +115,13 @@ export function Workspace() {
           transition={{ duration: 0.45, ease: "easeOut", delay: 0.08 }}
           className="lg:sticky lg:top-8 lg:max-h-[calc(100dvh-4rem)]"
         >
-          <SidePanel settings={settings} onSettingsChange={setSettings} cue={SAMPLE_CUE} />
+          <SidePanel
+            settings={settings}
+            onSettingsChange={setSettings}
+            pipeline={state}
+            activeCueId={activeCueId}
+            onSeek={(t) => playerRef.current?.seek(t)}
+          />
         </motion.section>
       </div>
     </main>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref } from "react";
 import {
   CaptionsIcon,
   FullscreenIcon,
@@ -9,6 +9,7 @@ import {
   PlayIcon,
   VolumeIcon,
 } from "@/components/ui/Icons";
+import { findCue } from "@/lib/captions/corrections";
 import type { CaptionCue, CaptionSettings } from "@/lib/captions/types";
 import { CaptionOverlay } from "./CaptionOverlay";
 
@@ -22,18 +23,26 @@ function fmt(t: number): string {
   return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+export interface PlayerHandle {
+  seek: (seconds: number) => void;
+}
+
 interface Props {
   src: string;
   title: string;
-  cue: CaptionCue | null;
+  /** Real captions, sorted by time. The active cue is picked from the playhead. */
+  cues: CaptionCue[];
   settings: CaptionSettings;
+  /** Called whenever the cue under the playhead changes (null = silence). */
+  onActiveCueChange?: (id: string | null) => void;
+  ref?: Ref<PlayerHandle>;
 }
 
 /**
  * Video with a caption overlay. Controls sit *below* the picture (not over it),
  * so bottom-positioned captions are never hidden by the player UI.
  */
-export function VideoPlayer({ src, title, cue, settings }: Props) {
+export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -44,6 +53,34 @@ export function VideoPlayer({ src, title, cue, settings }: Props) {
   const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState(false);
   const [canFullscreen, setCanFullscreen] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    seek: (t) => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.currentTime = Math.max(0, t);
+      setTime(v.currentTime);
+    },
+  }));
+
+  // Keep the active cue in sync with the playhead. timeupdate only fires ~4x/second,
+  // so while playing we also poll every frame (cheap: state only changes at cue edges).
+  const syncCue = useCallback(() => {
+    const v = videoRef.current;
+    if (v) setActiveId(findCue(cues, v.currentTime)?.id ?? null);
+  }, [cues]);
+  useEffect(() => {
+    syncCue();
+    if (!playing) return;
+    let raf = requestAnimationFrame(function tick() {
+      syncCue();
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [playing, syncCue]);
+  useEffect(() => onActiveCueChange?.(activeId), [activeId, onActiveCueChange]);
+  const cue = activeId ? (cues.find((c) => c.id === activeId) ?? null) : null;
 
   useEffect(() => {
     setCanFullscreen(document.fullscreenEnabled);
@@ -112,7 +149,11 @@ export function VideoPlayer({ src, title, cue, settings }: Props) {
           onClick={toggle}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
-          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+          onTimeUpdate={(e) => {
+            setTime(e.currentTarget.currentTime);
+            syncCue();
+          }}
+          onSeeked={syncCue}
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
           onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
           onError={() => setError(true)}
