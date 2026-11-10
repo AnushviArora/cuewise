@@ -26,7 +26,7 @@ It is read only in `src/lib/server/env.ts`, which imports `server-only` so the b
 ## How grounded captions work
 
 1. **Transcribe** — the browser decodes the video's audio to 16 kHz mono WAV in 10-minute chunks (the video itself is never uploaded) and sends each to `/api/transcribe` (`whisper-1`, the only OpenAI speech model with segment timestamps).
-2. **Read slides** — `/api/slides` extracts the PDF text (`unpdf`) and `gpt-4o-mini` lists names, technical and course terms.
+2. **Read documents** — `/api/slides` takes up to 15 PDFs (slides, notes, handouts), extracts their text (`unpdf`) in parallel, drops repeated lines, shares a fixed ~60k-character budget fairly across documents, and makes one `gpt-4o-mini` call that returns a merged, de-duplicated term list (max 150, most relevant first).
 3. **Check terms** — `/api/correct` asks the model for *edit proposals only* (never rewritten text). `src/lib/captions/corrections.ts` validates them (word must exist in the cue, correction must be a slide term) and applies them itself, so timestamps and wording are untouched. Only high-confidence, spelling-similar fixes are applied; everything else is kept as spoken and marked `needs_review`.
 
 Edits are stored as `CaptionEdit[]` (original, corrected, matched term, confidence, reason, status) — the data the Review tab will use. The pipeline lives in `src/features/captions/useCaptionPipeline.ts`.

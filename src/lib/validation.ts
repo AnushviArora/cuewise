@@ -1,5 +1,6 @@
 export const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
 export const MAX_SLIDES_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_SLIDES_FILES = 15;
 export const MAX_COURSE_NAME = 120;
 
 const mb = (n: number) => `${Math.round(n / (1024 * 1024))} MB`;
@@ -28,7 +29,36 @@ export function validateVideo(file: File | null): string | null {
   return null;
 }
 
-/** Slides are optional: null file is fine. */
+/**
+ * Adds newly picked/dropped PDFs to the current list. Invalid files, duplicates and
+ * anything past the 15-file cap are skipped; `messages` explains each in friendly words.
+ */
+export function addSlideFiles(
+  current: File[],
+  incoming: File[],
+): { files: File[]; messages: string[] } {
+  const files = [...current];
+  const messages: string[] = [];
+  let overLimit = 0;
+  const same = (a: File, b: File) =>
+    a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+
+  for (const f of incoming) {
+    const problem = validateSlides(f);
+    if (problem) messages.push(problem);
+    else if (files.some((x) => same(x, f))) messages.push(`“${f.name}” is already added.`);
+    else if (files.length >= MAX_SLIDES_FILES) overLimit++;
+    else files.push(f);
+  }
+  if (overLimit > 0) {
+    messages.push(
+      `You can add up to ${MAX_SLIDES_FILES} documents. ${overLimit} ${overLimit === 1 ? "file wasn’t" : "files weren’t"} added. Remove one to make room.`,
+    );
+  }
+  return { files, messages };
+}
+
+/** One PDF is valid when it's a PDF under the size limit. */
 export function validateSlides(file: File | null): string | null {
   if (!file) return null;
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);

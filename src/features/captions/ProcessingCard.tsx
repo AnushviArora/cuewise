@@ -122,7 +122,7 @@ export function ProcessingCard({ state, hasSlides, onRetry }: Props) {
             >
               {state.detail ??
                 (state.step === "slides"
-                  ? "Picking out names and technical terms from your slides"
+                  ? "Picking out names and technical terms from your documents"
                   : state.step === "terms"
                     ? "Fixing misheard terms, leaving everything else as spoken"
                     : "")}

@@ -19,11 +19,14 @@ export interface TranscribeResponse {
   cues: { start: number; end: number; text: string }[];
 }
 
-/** POST /api/slides — multipart: `slides` (PDF), `courseName`. */
+/** POST /api/slides — multipart: one or more `slides` (PDF) fields, plus `courseName`. */
 export interface SlidesResponse {
+  /** Merged and de-duplicated across all documents, most relevant first. */
   terms: SlideTerm[];
-  /** False when the PDF had no extractable text (e.g. scanned images). */
-  readable: boolean;
+  /** Documents that had readable text and were used. */
+  documentsUsed: number;
+  /** Names of documents skipped because they had no readable text. */
+  skipped: string[];
 }
 
 /** POST /api/correct — check a batch of cues against slide terms. */

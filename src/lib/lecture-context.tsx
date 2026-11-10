@@ -7,12 +7,13 @@ export interface Lecture {
   video: File;
   /** Browser-only blob URL. Never leaves the device. */
   videoUrl: string;
-  slides: File | null;
+  /** Optional supporting PDFs: slides, lecture notes, handouts (0–15). */
+  slides: File[];
 }
 
 interface LectureContextValue {
   lecture: Lecture | null;
-  setLecture: (input: { courseName: string; video: File; slides: File | null }) => void;
+  setLecture: (input: { courseName: string; video: File; slides: File[] }) => void;
   clearLecture: () => void;
 }
 

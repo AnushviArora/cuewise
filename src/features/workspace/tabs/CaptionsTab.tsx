@@ -47,16 +47,17 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 function Summary({ result }: { result: CaptionResult }) {
   const { fixed, needsReview } = summarize(result.edits);
+  const { documentsUploaded, documentsUsed, documentsSkipped } = result;
 
-  if (!result.hadSlides) {
+  if (documentsUploaded === 0) {
     return (
       <div className={card}>
         <p className="text-sm font-medium">Transcript ready</p>
         <Note>
-          Adding your slides improves accuracy: Cuewise uses them to correct names and technical
-          terms.{" "}
+          Adding your slides, notes or handouts improves accuracy: Cuewise uses them to correct
+          names and technical terms.{" "}
           <Link href="/" className="text-accent underline underline-offset-2">
-            Upload with slides
+            Upload with documents
           </Link>
         </Note>
       </div>
@@ -70,25 +71,30 @@ function Summary({ result }: { result: CaptionResult }) {
       </div>
     );
   }
-  if (result.slidesUnreadable) {
+  if (documentsUsed === 0 || result.terms.length === 0) {
     return (
       <div className={card}>
         <p className="text-sm font-medium">Transcript ready</p>
         <Note>
-          We couldn’t find readable text in your slides (scanned images?), so no terms were
-          checked. A text-based PDF export works best.
+          We couldn’t find readable text in your {documentsUploaded === 1 ? "document" : "documents"}{" "}
+          (scanned images?), so no terms were checked. Text-based PDF exports work best.
         </Note>
       </div>
     );
   }
+  const docs = plural(documentsUsed, "document");
   return (
     <div className="rounded-2xl border border-accent/30 bg-accent-soft p-4">
       <p className="text-sm font-medium">
         {fixed === 0 && needsReview === 0
-          ? "No slide terms needed fixing"
-          : `Fixed ${plural(fixed, "term")} using your slides${needsReview ? ` · ${needsReview} need${needsReview === 1 ? "s" : ""} review` : ""}`}
+          ? `No terms needed fixing (checked against ${docs})`
+          : `Fixed ${plural(fixed, "term")} using ${docs}${needsReview ? ` · ${needsReview} need${needsReview === 1 ? "s" : ""} review` : ""}`}
       </p>
-      <Note>Checked against {plural(result.terms.length, "term")} from your slides.</Note>
+      <Note>
+        Checked against {plural(result.terms.length, "term")} from your {documentsUsed === 1 ? "document" : "documents"}.
+        {documentsSkipped.length > 0 &&
+          ` Skipped ${documentsSkipped.length} with no readable text: ${documentsSkipped.join(", ")}.`}
+      </Note>
     </div>
   );
 }
@@ -135,8 +141,8 @@ function Transcript({
               key={m.start}
               title={
                 applied
-                  ? `Corrected from “${edit.original}” to match “${edit.term}” in your slides`
-                  : `Might be “${edit.corrected}” (from your slides) — needs review`
+                  ? `Corrected from “${edit.original}” to match “${edit.term}” in your documents`
+                  : `Might be “${edit.corrected}” (from your documents) — needs review`
               }
               className={`rounded px-0.5 text-inherit ${
                 applied
@@ -185,7 +191,7 @@ export function CaptionsTab({ settings, onChange, pipeline, activeCueId, onSeek 
           <p className="text-xs text-muted">
             Select a line to jump there.{" "}
             <span className="rounded bg-accent/20 px-1">Highlighted</span> words were corrected from
-            your slides; <span className="rounded bg-amber-300/15 px-1">dotted</span> ones need review.
+            your documents; <span className="rounded bg-amber-300/15 px-1">dotted</span> ones need review.
           </p>
         </section>
       ) : (

@@ -48,9 +48,12 @@ export interface CaptionResult {
   cues: CaptionCue[];
   edits: CaptionEdit[];
   terms: SlideTerm[];
-  hadSlides: boolean;
-  /** Slides were uploaded but yielded no usable text (e.g. scanned images). */
-  slidesUnreadable: boolean;
+  /** How many documents (slides, notes, handouts) were uploaded. */
+  documentsUploaded: number;
+  /** How many of them had readable text and contributed terms. */
+  documentsUsed: number;
+  /** Names of uploaded documents with no readable text (e.g. scanned images). */
+  documentsSkipped: string[];
   /** Slides were uploaded but checking them failed; captions are the raw transcript. */
   slidesError?: string;
 }

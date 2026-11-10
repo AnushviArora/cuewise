@@ -5,18 +5,19 @@ import { useRouter } from "next/navigation";
 import { useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/Button";
 import { GlassPanel } from "@/components/ui/GlassPanel";
-import { ArrowRightIcon, CaptionsIcon, FileIcon, VideoIcon } from "@/components/ui/Icons";
+import { ArrowRightIcon, CaptionsIcon, VideoIcon } from "@/components/ui/Icons";
 import { useLecture } from "@/lib/lecture-context";
 import {
+  addSlideFiles,
   MAX_COURSE_NAME,
   validateCourseName,
-  validateSlides,
   validateVideo,
 } from "@/lib/validation";
+import { DocumentsDropzone } from "./DocumentsDropzone";
 import { FileDropzone } from "./FileDropzone";
 
-type Errors = { course: string | null; video: string | null; slides: string | null };
-const NO_ERRORS: Errors = { course: null, video: null, slides: null };
+type Errors = { course: string | null; video: string | null };
+const NO_ERRORS: Errors = { course: null, video: null };
 
 export function UploadForm() {
   const router = useRouter();
@@ -26,7 +27,8 @@ export function UploadForm() {
 
   const [course, setCourse] = useState("");
   const [video, setVideo] = useState<File | null>(null);
-  const [slides, setSlides] = useState<File | null>(null);
+  const [slides, setSlides] = useState<File[]>([]);
+  const [slideMessages, setSlideMessages] = useState<string[]>([]);
   const [errors, setErrors] = useState<Errors>(NO_ERRORS);
 
   const onSubmit = (e: FormEvent) => {
@@ -34,10 +36,9 @@ export function UploadForm() {
     const next: Errors = {
       course: validateCourseName(course),
       video: validateVideo(video),
-      slides: validateSlides(slides),
     };
     setErrors(next);
-    if (next.course || next.video || next.slides) {
+    if (next.course || next.video) {
       // Move focus to the first problem so keyboard/screen-reader users land on it.
       if (next.course) courseRef.current?.focus();
       else document.getElementById("video-field")?.querySelector("input")?.focus();
@@ -61,7 +62,7 @@ export function UploadForm() {
           Upload a lecture
         </h1>
         <p className="mt-3 max-w-xl text-base leading-relaxed text-muted">
-          Add the video and, optionally, the slides. You’ll preview captions and fine-tune how
+          Add the video and, optionally, slides, lecture notes or handouts. You’ll preview captions and fine-tune how
           they appear before publishing.
         </p>
       </div>
@@ -111,17 +112,17 @@ export function UploadForm() {
             />
           </div>
 
-          <FileDropzone
-            label="Lecture slides"
-            optional
-            hint="PDF, up to 50 MB. Used to fix names and technical terms in the captions."
-            accept="application/pdf,.pdf"
-            icon={<FileIcon />}
-            file={slides}
-            error={errors.slides}
-            onFile={(f) => {
-              setSlides(f);
-              setErrors((p) => ({ ...p, slides: validateSlides(f) }));
+          <DocumentsDropzone
+            files={slides}
+            messages={slideMessages}
+            onAdd={(incoming) => {
+              const r = addSlideFiles(slides, incoming);
+              setSlides(r.files);
+              setSlideMessages(r.messages);
+            }}
+            onRemove={(i) => {
+              setSlides((prev) => prev.filter((_, j) => j !== i));
+              setSlideMessages([]);
             }}
           />
 

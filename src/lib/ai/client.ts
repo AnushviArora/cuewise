@@ -42,9 +42,9 @@ export function transcribeChunk(audio: Blob, courseName: string) {
   return post<FormData, TranscribeResponse>("/api/transcribe", form);
 }
 
-export function extractSlideTerms(slides: File, courseName: string) {
+export function extractSlideTerms(slides: File[], courseName: string) {
   const form = new FormData();
-  form.append("slides", slides);
+  for (const f of slides) form.append("slides", f);
   form.append("courseName", courseName);
   return post<FormData, SlidesResponse>("/api/slides", form);
 }

@@ -66,16 +66,18 @@ export function useCaptionPipeline(lecture: Lecture | null) {
 
         let terms: SlideTerm[] = [];
         let edits: CaptionEdit[] = [];
-        let slidesUnreadable = false;
+        let documentsUsed = 0;
+        let documentsSkipped: string[] = [];
 
         let slidesError: string | undefined;
-        if (lecture.slides) {
+        if (lecture.slides.length > 0) {
           // A failure here shouldn't throw away a finished (and paid-for) transcript.
           try {
             go("slides");
             const res = await extractSlideTerms(lecture.slides, lecture.courseName);
             terms = res.terms;
-            slidesUnreadable = !res.readable || res.terms.length === 0;
+            documentsUsed = res.documentsUsed;
+            documentsSkipped = res.skipped;
 
             if (terms.length > 0) {
               go("terms");
@@ -101,7 +103,15 @@ export function useCaptionPipeline(lecture: Lecture | null) {
         go("done");
         set({
           status: "done",
-          result: { cues, edits, terms, hadSlides: !!lecture.slides, slidesUnreadable, slidesError },
+          result: {
+            cues,
+            edits,
+            terms,
+            documentsUploaded: lecture.slides.length,
+            documentsUsed,
+            documentsSkipped,
+            slidesError,
+          },
         });
       } catch (e) {
         set({

@@ -69,9 +69,12 @@ export function Workspace() {
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-wide text-subtle">Workspace</p>
           <h1 className="truncate text-2xl font-semibold tracking-tight">{lecture.courseName}</h1>
-          {lecture.slides && (
+          {lecture.slides.length > 0 && (
             <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted">
-              <FileIcon width={14} height={14} /> Slides: {lecture.slides.name}
+              <FileIcon width={14} height={14} />
+              {lecture.slides.length === 1
+                ? `Slides: ${lecture.slides[0].name}`
+                : `${lecture.slides.length} documents`}
             </p>
           )}
         </div>
@@ -86,7 +89,7 @@ export function Workspace() {
       <AnimatePresence>
         {state.status !== "done" && (
           <div className="mb-6" key="progress">
-            <ProcessingCard state={state} hasSlides={!!lecture.slides} onRetry={retry} />
+            <ProcessingCard state={state} hasSlides={lecture.slides.length > 0} onRetry={retry} />
           </div>
         )}
       </AnimatePresence>
