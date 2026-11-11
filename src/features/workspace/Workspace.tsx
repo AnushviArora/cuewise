@@ -100,6 +100,8 @@ export function Workspace() {
           initial={{ opacity: 0, x: -24 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.45, ease: "easeOut" }}
+          // On small screens the video stays pinned while you scroll the transcript below it.
+          className="max-lg:sticky max-lg:top-2 max-lg:z-30"
         >
           <VideoPlayer
             src={lecture.videoUrl}
@@ -107,6 +109,7 @@ export function Workspace() {
             ref={playerRef}
             cues={cues}
             settings={settings}
+            onSettingsChange={setSettings}
             onActiveCueChange={setActiveCueId}
           />
         </motion.section>
@@ -119,8 +122,6 @@ export function Workspace() {
           className="lg:sticky lg:top-8 lg:max-h-[calc(100dvh-4rem)]"
         >
           <SidePanel
-            settings={settings}
-            onSettingsChange={setSettings}
             pipeline={state}
             activeCueId={activeCueId}
             onSeek={(t) => playerRef.current?.seek(t)}

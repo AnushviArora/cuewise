@@ -1,17 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useId, useImperativeHandle, useRef, useState, type KeyboardEvent, type Ref } from "react";
+import { createPortal } from "react-dom";
 import {
   CaptionsIcon,
   FullscreenIcon,
   MuteIcon,
   PauseIcon,
   PlayIcon,
+  SettingsIcon,
   VolumeIcon,
 } from "@/components/ui/Icons";
 import { findCue } from "@/lib/captions/corrections";
 import type { CaptionCue, CaptionSettings } from "@/lib/captions/types";
-import { CaptionOverlay } from "./CaptionOverlay";
+import { CaptionOverlay, SAMPLE_CUE } from "./CaptionOverlay";
+import { CaptionSettingsPanel } from "./CaptionSettingsPanel";
 
 const SKIP_SECONDS = 5;
 
@@ -33,6 +36,8 @@ interface Props {
   /** Real captions, sorted by time. The active cue is picked from the playhead. */
   cues: CaptionCue[];
   settings: CaptionSettings;
+  /** Lets the on-video settings panel change caption display settings. */
+  onSettingsChange: (next: CaptionSettings) => void;
   /** Called whenever the cue under the playhead changes (null = silence). */
   onActiveCueChange?: (id: string | null) => void;
   ref?: Ref<PlayerHandle>;
@@ -42,7 +47,13 @@ interface Props {
  * Video with a caption overlay. Controls sit *below* the picture (not over it),
  * so bottom-positioned captions are never hidden by the player UI.
  */
-export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref }: Props) {
+/** Below this player width the settings panel becomes a bottom sheet instead of a side panel. */
+const SIDE_PANEL_MIN_WIDTH = 520;
+// Full class names (Tailwind can't see names built from pieces).
+const SIDE_CLASS = { left: "left-3", right: "right-3" } as const;
+const EDGE_CLASS = { top: "top-3", bottom: "bottom-3" } as const;
+
+export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onActiveCueChange, ref }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -50,6 +61,12 @@ export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref
   const [duration, setDuration] = useState(0);
   const [muted, setMuted] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [boxWidth, setBoxWidth] = useState(1000);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const gearRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
   const [fullscreen, setFullscreen] = useState(false);
   const [error, setError] = useState(false);
   const [canFullscreen, setCanFullscreen] = useState(false);
@@ -81,6 +98,19 @@ export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref
   }, [playing, syncCue]);
   useEffect(() => onActiveCueChange?.(activeId), [activeId, onActiveCueChange]);
   const cue = activeId ? (cues.find((c) => c.id === activeId) ?? null) : null;
+  // While the settings panel is open and no caption is showing (paused, silence, or CC off),
+  // show a sample so every change is still visible on the video.
+  const shownCue = settingsOpen && (!captionsOn || !cue) ? SAMPLE_CUE : captionsOn ? cue : null;
+  // Keep the panel clear of the captions: opposite side of where they sit, and for centred
+  // captions the opposite top/bottom edge. Small players use a bottom sheet instead.
+  const placement =
+    boxWidth >= SIDE_PANEL_MIN_WIDTH
+      ? ({
+          kind: "side",
+          side: settings.horizontal === "right" ? "left" : "right",
+          edge: settings.horizontal === "center" && settings.position === "bottom" ? "top" : "bottom",
+        } as const)
+      : ({ kind: "sheet", edge: settings.position === "bottom" ? "top" : "bottom" } as const);
 
   useEffect(() => {
     setCanFullscreen(document.fullscreenEnabled);
@@ -125,19 +155,53 @@ export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref
     else void wrapRef.current?.requestFullscreen();
   };
 
+  // Track the picture's width to choose between a side panel and a bottom sheet.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBoxWidth(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const closeSettings = useCallback((refocus: boolean) => {
+    setSettingsOpen(false);
+    if (refocus) gearRef.current?.focus();
+  }, []);
+
+  // Click anywhere outside the panel (and its button) closes it.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || gearRef.current?.contains(t)) return;
+      setSettingsOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [settingsOpen]);
+
   const ctrl =
     "grid h-10 w-10 place-items-center rounded-lg text-ink transition-colors hover:bg-white/10";
 
   return (
     <div
       ref={wrapRef}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && settingsOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeSettings(true);
+        }
+      }}
       className={`flex flex-col overflow-hidden bg-black ${
         fullscreen ? "h-full w-full" : "rounded-3xl border border-white/10 shadow-glass"
       }`}
     >
       <div
+        ref={boxRef}
         className={`relative bg-black [container-type:inline-size] ${
-          fullscreen ? "min-h-0 flex-1" : "aspect-video"
+          fullscreen ? "min-h-0 flex-1" : "aspect-video max-lg:max-h-[45dvh]"
         }`}
       >
         <video
@@ -160,7 +224,27 @@ export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref
           playsInline
           className="absolute inset-0 h-full w-full cursor-pointer object-contain"
         />
-        {captionsOn && !error && <CaptionOverlay cue={cue} settings={settings} />}
+        {!error && <CaptionOverlay cue={shownCue} settings={settings} />}
+        {settingsOpen && placement.kind === "side" && (
+          <CaptionSettingsPanel
+            ref={panelRef}
+            id={panelId}
+            settings={settings}
+            onChange={onSettingsChange}
+            onClose={() => closeSettings(true)}
+            className={`absolute z-20 max-h-[calc(100%-1.5rem)] w-[16rem] ${SIDE_CLASS[placement.side]} ${EDGE_CLASS[placement.edge]}`}
+          />
+        )}
+        {settingsOpen && placement.kind === "sheet" && fullscreen && (
+          <CaptionSettingsPanel
+            ref={panelRef}
+            id={panelId}
+            settings={settings}
+            onChange={onSettingsChange}
+            onClose={() => closeSettings(true)}
+            className={`absolute inset-x-2 z-20 max-h-[70%] ${placement.edge === "top" ? "top-2" : "bottom-2"}`}
+          />
+        )}
 
         {error && (
           <div role="alert" className="absolute inset-0 grid place-items-center bg-black/80 p-6 text-center">
@@ -218,6 +302,18 @@ export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref
         >
           <CaptionsIcon />
         </button>
+        <button
+          ref={gearRef}
+          type="button"
+          onClick={() => setSettingsOpen((v) => !v)}
+          aria-haspopup="dialog"
+          aria-expanded={settingsOpen}
+          aria-controls={settingsOpen ? panelId : undefined}
+          aria-label="Caption settings"
+          className={`${ctrl} ${settingsOpen ? "text-accent" : ""}`}
+        >
+          <SettingsIcon />
+        </button>
         {canFullscreen && (
           <button
             type="button"
@@ -229,6 +325,20 @@ export function VideoPlayer({ src, title, cues, settings, onActiveCueChange, ref
           </button>
         )}
       </div>
+      {settingsOpen &&
+        placement.kind === "sheet" &&
+        !fullscreen &&
+        createPortal(
+          <CaptionSettingsPanel
+            ref={panelRef}
+            id={panelId}
+            settings={settings}
+            onChange={onSettingsChange}
+            onClose={() => closeSettings(true)}
+            className="fixed inset-x-2 bottom-2 z-40 max-h-[52dvh]"
+          />,
+          document.body,
+        )}
     </div>
   );
 }

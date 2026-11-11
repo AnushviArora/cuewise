@@ -2,21 +2,18 @@
 
 import { GlassPanel } from "@/components/ui/GlassPanel";
 import { Tabs } from "@/components/ui/Tabs";
-import type { CaptionSettings } from "@/lib/captions/types";
 import type { PipelineState } from "../captions/useCaptionPipeline";
 import { AskTab } from "./tabs/AskTab";
 import { CaptionsTab } from "./tabs/CaptionsTab";
 import { ReviewTab } from "./tabs/ReviewTab";
 
 interface Props {
-  settings: CaptionSettings;
-  onSettingsChange: (next: CaptionSettings) => void;
   pipeline: PipelineState;
   activeCueId: string | null;
   onSeek: (seconds: number) => void;
 }
 
-export function SidePanel({ settings, onSettingsChange, pipeline, activeCueId, onSeek }: Props) {
+export function SidePanel({ pipeline, activeCueId, onSeek }: Props) {
   return (
     <GlassPanel className="flex h-full min-h-[28rem] flex-col p-5 sm:p-6">
       <Tabs
@@ -27,8 +24,6 @@ export function SidePanel({ settings, onSettingsChange, pipeline, activeCueId, o
             label: "Captions",
             content: (
               <CaptionsTab
-                settings={settings}
-                onChange={onSettingsChange}
                 pipeline={pipeline}
                 activeCueId={activeCueId}
                 onSeek={onSeek}

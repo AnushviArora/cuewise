@@ -4,10 +4,19 @@ import { motion } from "framer-motion";
 import { splitIntoRows } from "@/lib/captions/settings";
 import type { CaptionCue, CaptionSettings } from "@/lib/captions/types";
 
-const JUSTIFY = { top: "flex-start", middle: "center", bottom: "flex-end" } as const;
+const VERTICAL = { top: "flex-start", middle: "center", bottom: "flex-end" } as const;
+const HORIZONTAL = { left: "flex-start", center: "center", right: "flex-end" } as const;
+
+/** Shown while the settings panel is open and nothing is being said, so changes stay visible. */
+export const SAMPLE_CUE: CaptionCue = {
+  id: "sample",
+  start: 0,
+  end: 0,
+  text: "This is how your captions will look on the lecture video.",
+};
 
 interface Props {
-  /** The cue to show right now. Later: derive from currentTime + CaptionCue[]. */
+  /** The cue to show right now. */
   cue: CaptionCue | null;
   settings: CaptionSettings;
 }
@@ -15,16 +24,24 @@ interface Props {
 /**
  * Renders captions over the video. Its parent must set `container-type: inline-size`
  * so font size and spacing (cqw units) scale with the player, including fullscreen.
+ *
+ * The caption is a shrink-to-fit block that sits in one of nine places (top / middle /
+ * bottom x left / center / right). Side positions use a narrower block so they sit clearly
+ * to one side, leaving the rest of the slide or board uncovered.
  */
 export function CaptionOverlay({ cue, settings }: Props) {
   if (!cue) return null;
-  const { rows, position, align, indent, fontSize } = settings;
+  const { rows, position, horizontal, align, fontSize } = settings;
   const lines = splitIntoRows(cue.text, rows);
 
   return (
     <div
       className="pointer-events-none absolute inset-0 flex flex-col"
-      style={{ justifyContent: JUSTIFY[position], padding: "3cqw" }}
+      style={{
+        justifyContent: VERTICAL[position],
+        alignItems: HORIZONTAL[horizontal],
+        padding: "3cqw",
+      }}
     >
       <motion.div
         layout="position"
@@ -32,9 +49,8 @@ export function CaptionOverlay({ cue, settings }: Props) {
         style={{
           fontSize: `${fontSize}cqw`,
           textAlign: align,
-          paddingLeft: align === "right" ? 0 : `${indent}%`,
-          paddingRight: align === "left" ? 0 : `${indent}%`,
           lineHeight: 1.45,
+          maxWidth: horizontal === "center" ? "94%" : "52%",
         }}
       >
         {lines.map((line, i) => (

@@ -3,15 +3,17 @@ import type { CaptionSettings } from "./types";
 export const DEFAULT_CAPTION_SETTINGS: CaptionSettings = {
   rows: 2,
   position: "bottom",
-  indent: 0,
+  horizontal: "center",
   align: "center",
   fontSize: 2.6,
 };
 
 export const FONT_SIZE_RANGE = { min: 1.6, max: 4, step: 0.1 } as const;
-export const INDENT_RANGE = { min: 0, max: 20, step: 1 } as const;
 
 const STORAGE_KEY = "cuewise:caption-settings:v1";
+
+const isSide = (v: unknown): v is "left" | "center" | "right" =>
+  v === "left" || v === "center" || v === "right";
 
 /** Validates unknown input into a safe CaptionSettings (bad fields fall back to defaults). */
 export function sanitizeSettings(input: unknown): CaptionSettings {
@@ -26,9 +28,9 @@ export function sanitizeSettings(input: unknown): CaptionSettings {
       o.position === "top" || o.position === "middle" || o.position === "bottom"
         ? o.position
         : d.position,
-    align:
-      o.align === "left" || o.align === "center" || o.align === "right" ? o.align : d.align,
-    indent: clamp(o.indent, INDENT_RANGE.min, INDENT_RANGE.max, d.indent),
+    align: isSide(o.align) ? o.align : d.align,
+    // Older saved settings had no horizontal position; their alignment is the closest match.
+    horizontal: isSide(o.horizontal) ? o.horizontal : isSide(o.align) ? o.align : d.horizontal,
     fontSize: clamp(o.fontSize, FONT_SIZE_RANGE.min, FONT_SIZE_RANGE.max, d.fontSize),
   };
 }

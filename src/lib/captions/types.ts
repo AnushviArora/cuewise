@@ -59,14 +59,19 @@ export interface CaptionResult {
 }
 
 export type CaptionPosition = "top" | "middle" | "bottom";
+/** Where the caption block sits across the video. */
+export type CaptionHorizontal = "left" | "center" | "right";
+/** How text lines align inside the caption block. */
 export type CaptionAlign = "left" | "center" | "right";
 
 export interface CaptionSettings {
   /** How many lines the caption text is balanced across (1–3). */
   rows: 1 | 2 | 3;
+  /** Vertical placement of the caption block. */
   position: CaptionPosition;
-  /** Inset from the aligned edge, as % of video width (0–20). */
-  indent: number;
+  /** Horizontal placement of the caption block (move it off slides or board content). */
+  horizontal: CaptionHorizontal;
+  /** Text alignment inside the caption block. */
   align: CaptionAlign;
   /** Font size as % of video width (1.6–4). Scales with the player. */
   fontSize: number;
