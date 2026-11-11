@@ -45,6 +45,7 @@ const SCHEMA = {
 
 export async function POST(req: Request) {
   try {
+    const t0 = performance.now();
     const body = (await req.json().catch(() => null)) as CorrectRequest | null;
     if (!body || !Array.isArray(body.cues) || !Array.isArray(body.terms)) {
       return badRequest("Invalid request.");
@@ -61,7 +62,10 @@ export async function POST(req: Request) {
       user: `Course: ${String(body.courseName ?? "").slice(0, 120) || "(unknown)"}\n\nGlossary:\n${glossary}\n\nCaptions:\n${captions}`,
       schemaName: "caption_edits",
       schema: SCHEMA,
+      maxTokens: 2500,
+      signal: req.signal,
     });
+    console.info(`[timing] correct: ${body.cues.length} cues ${Math.round(performance.now() - t0)}ms`);
 
     return NextResponse.json({
       edits: validateEdits(edits, body.cues, body.terms),

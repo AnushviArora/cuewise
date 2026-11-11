@@ -12,7 +12,12 @@ export function notImplemented(feature: string) {
 
 /** An error from OpenAI, carrying its HTTP status. */
 export class OpenAIError extends Error {
-  constructor(public status: number, detail: string) {
+  constructor(
+    public status: number,
+    detail: string,
+    /** "truncated": the reply hit the output limit. "timeout": we stopped waiting. */
+    public kind?: "truncated" | "timeout" | "bad_output",
+  ) {
     super(detail);
   }
 }
@@ -36,7 +41,11 @@ export function apiError(err: unknown) {
   if (err instanceof OpenAIError) {
     const s = err.status;
     const message =
-      s === 401
+      err.kind === "timeout"
+        ? "OpenAI took too long to answer. Nothing was lost. Try again in a moment."
+        : err.kind === "truncated" || err.kind === "bad_output"
+          ? "The AI’s answer came back incomplete. Nothing was lost. Try again; it will check in smaller pieces."
+          : s === 401
         ? "OpenAI rejected the API key. Check OPENAI_API_KEY in .env.local."
         : s === 429
           ? "OpenAI is rate-limiting this key or the account is out of credit. Wait a moment and retry, or check your billing."

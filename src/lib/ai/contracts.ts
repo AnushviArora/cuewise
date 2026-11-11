@@ -27,6 +27,8 @@ export interface SlidesResponse {
   documentsUsed: number;
   /** Names of documents skipped because they had no readable text. */
   skipped: string[];
+  /** Documents that were readable but whose term check failed (others still count). */
+  failed?: string[];
 }
 
 /** POST /api/correct — check a batch of cues against slide terms. */

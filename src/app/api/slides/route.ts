@@ -3,15 +3,22 @@ import { extractText, getDocumentProxy } from "unpdf";
 import type { SlidesResponse } from "@/lib/ai/contracts";
 import type { SlideTerm, SlideTermKind } from "@/lib/captions/types";
 import { getOpenAIKey } from "@/lib/server/env";
-import { apiError, badRequest } from "@/lib/server/http";
-import { chatJson } from "@/lib/server/openai";
+import { apiError, badRequest, OpenAIError } from "@/lib/server/http";
+import { chatJsonRaw } from "@/lib/server/openai";
 import { MAX_SLIDES_BYTES, MAX_SLIDES_FILES } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-/** Total text sent to the model, however many documents there are (~15k tokens). */
-const TOTAL_CHAR_BUDGET = 60_000;
+/**
+ * Each document is checked in its own small request (several run at once), instead of one
+ * huge request for everything. That keeps replies short, fast and impossible to cut off.
+ */
+const TOTAL_CHAR_BUDGET = 120_000;
+const MAX_CHARS_PER_DOC = 30_000;
+const TERMS_PER_DOC = 60;
+const DOC_REPLY_TOKENS = 1_800;
+const PARALLEL_DOCS = 5;
 const MAX_TERMS = 150;
 
 const SYSTEM = `You build a glossary from lecture documents (slides, lecture notes, handouts), to help fix speech-to-text errors.
@@ -70,8 +77,58 @@ function allocate(lengths: number[], budget: number): number[] {
   return caps;
 }
 
+/** Runs `fn` over `items`, at most `limit` at a time, keeping result order. */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await fn(items[i], i);
+      }
+    }),
+  );
+  return out;
+}
+
+/** Pulls whole {term, kind} objects out of a reply that was cut off mid-way. */
+function salvageTerms(content: string): SlideTerm[] {
+  const re = /\{\s*"term"\s*:\s*("(?:[^"\\]|\\.)*")\s*,\s*"kind"\s*:\s*"(name|technical|course)"\s*\}/g;
+  return [...content.matchAll(re)].map((m) => ({ term: JSON.parse(m[1]) as string, kind: m[2] as SlideTermKind }));
+}
+
+async function termsForDoc(
+  name: string,
+  text: string,
+  course: string,
+  signal: AbortSignal,
+): Promise<SlideTerm[]> {
+  const { content, finishReason } = await chatJsonRaw({
+    system: SYSTEM,
+    user: `Course: ${course || "(unknown)"}\nReturn at most ${TERMS_PER_DOC} terms.\n\n=== ${name} ===\n${text}`,
+    schemaName: "slide_terms",
+    schema: SCHEMA,
+    maxTokens: DOC_REPLY_TOKENS,
+    signal,
+  });
+  let raw: SlideTerm[] | null = null;
+  if (finishReason !== "length") {
+    try {
+      raw = (JSON.parse(content) as { terms: SlideTerm[] }).terms;
+    } catch {
+      /* fall through to salvage */
+    }
+  }
+  // A cut-off reply still holds complete terms: keep those instead of failing.
+  const list = (raw ?? salvageTerms(content)).filter((t) => typeof t.term === "string" && t.term.trim());
+  if (list.length === 0) throw new OpenAIError(502, "no usable terms", "bad_output");
+  return list.slice(0, TERMS_PER_DOC).map((t) => ({ term: t.term.trim(), kind: t.kind }));
+}
+
 export async function POST(req: Request) {
   try {
+    const t0 = performance.now();
     getOpenAIKey(); // fail fast with a friendly error before parsing PDFs
     const form = await req.formData();
     const files = form.getAll("slides").filter((f): f is File => f instanceof File && f.size > 0);
@@ -113,31 +170,55 @@ export async function POST(req: Request) {
       return NextResponse.json({ terms: [], documentsUsed: readable.length, skipped } satisfies SlidesResponse);
     }
 
-    const caps = allocate(usable.map((d) => d.text.length), TOTAL_CHAR_BUDGET);
-    const corpus = usable
-      .map((d, i) => `=== Document ${i + 1}: ${d.name} ===\n${d.text.slice(0, caps[i])}`)
-      .join("\n\n");
+    const caps = allocate(
+      usable.map((d) => Math.min(d.text.length, MAX_CHARS_PER_DOC)),
+      TOTAL_CHAR_BUDGET,
+    );
+    const t1 = performance.now();
 
-    const { terms: raw } = await chatJson<{ terms: SlideTerm[] }>({
-      system: SYSTEM,
-      user: `Course: ${course || "(unknown)"}\n\n${corpus}`,
-      schemaName: "slide_terms",
-      schema: SCHEMA,
+    const lists = await mapPool(usable, PARALLEL_DOCS, async (d, i) => {
+      try {
+        return { name: d.name, terms: await termsForDoc(d.name, d.text.slice(0, caps[i]), course, req.signal) };
+      } catch (e) {
+        if (req.signal.aborted) throw e;
+        console.error(`[slides] "${d.name}" failed:`, e instanceof Error ? e.message : e);
+        return { name: d.name, terms: null, error: e };
+      }
     });
+    const failed = lists.filter((l) => l.terms === null);
+    if (failed.length === lists.length) throw (failed[0] as { error: unknown }).error;
 
-    // Merge and de-duplicate (case/punctuation-insensitive), keeping the model's relevance order.
+    // Merge round-robin so every document is represented, then de-duplicate
+    // (case/punctuation-insensitive), keeping each document's relevance order.
+    const ok = lists.map((l) => l.terms ?? []);
     const seen = new Set<string>();
     const terms: SlideTerm[] = [];
-    for (const t of raw) {
-      const term = t.term?.trim();
-      if (!term) continue;
-      const key = term.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      terms.push({ term, kind: t.kind as SlideTermKind });
-      if (terms.length >= MAX_TERMS) break;
+    for (let rank = 0; terms.length < MAX_TERMS; rank++) {
+      let any = false;
+      for (const list of ok) {
+        const t = list[rank];
+        if (!t) continue;
+        any = true;
+        const key = t.term.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        terms.push(t);
+        if (terms.length >= MAX_TERMS) break;
+      }
+      if (!any) break;
     }
-    return NextResponse.json({ terms, documentsUsed: readable.length, skipped } satisfies SlidesResponse);
+    const t2 = performance.now();
+    console.info(
+      `[timing] slides: read ${files.length} PDFs ${Math.round(t1 - t0)}ms, ` +
+        `terms (${usable.length} docs, ${caps.reduce((a, b) => a + b, 0)} chars) ${Math.round(t2 - t1)}ms, ` +
+        `${terms.length} terms${failed.length ? `, ${failed.length} failed` : ""}`,
+    );
+    return NextResponse.json({
+      terms,
+      documentsUsed: readable.length,
+      skipped,
+      failed: failed.map((f) => f.name),
+    } satisfies SlidesResponse);
   } catch (e) {
     return apiError(e);
   }
