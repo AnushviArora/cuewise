@@ -13,8 +13,10 @@ import {
 } from "@/components/ui/Icons";
 import { findCue } from "@/lib/captions/corrections";
 import type { CaptionCue, CaptionSettings } from "@/lib/captions/types";
+import { PLAYBACK_RATES, loadRate, saveRate } from "@/lib/playback";
 import { CaptionOverlay, SAMPLE_CUE } from "./CaptionOverlay";
 import { CaptionSettingsPanel } from "./CaptionSettingsPanel";
+import { SpeedMenu } from "./SpeedMenu";
 
 const SKIP_SECONDS = 5;
 
@@ -28,6 +30,8 @@ function fmt(t: number): string {
 
 export interface PlayerHandle {
   seek: (seconds: number) => void;
+  /** Jump to `start`, play, and pause automatically at `end` (at the current speed). */
+  playClip: (start: number, end: number) => void;
 }
 
 interface Props {
@@ -71,13 +75,26 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
   const [error, setError] = useState(false);
   const [canFullscreen, setCanFullscreen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [rate, setRate] = useState(1);
+  const clipEnd = useRef<number | null>(null);
 
   useImperativeHandle(ref, () => ({
     seek: (t) => {
       const v = videoRef.current;
       if (!v) return;
+      clipEnd.current = null;
       v.currentTime = Math.max(0, t);
       setTime(v.currentTime);
+    },
+    playClip: (start, end) => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.currentTime = Math.max(0, start);
+      setTime(v.currentTime);
+      clipEnd.current = end;
+      void v.play().catch(() => {
+        clipEnd.current = null; // autoplay blocked: the reviewer can press play
+      });
     },
   }));
 
@@ -85,7 +102,13 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
   // so while playing we also poll every frame (cheap: state only changes at cue edges).
   const syncCue = useCallback(() => {
     const v = videoRef.current;
-    if (v) setActiveId(findCue(cues, v.currentTime)?.id ?? null);
+    if (!v) return;
+    // Captions follow the media clock, so they stay in sync at every playback speed.
+    setActiveId(findCue(cues, v.currentTime)?.id ?? null);
+    if (clipEnd.current !== null && v.currentTime >= clipEnd.current) {
+      clipEnd.current = null;
+      v.pause();
+    }
   }, [cues]);
   useEffect(() => {
     syncCue();
@@ -125,6 +148,19 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
     setTime(0);
   }, [src]);
 
+  // Restore the saved speed, and re-apply it whenever the video element reloads.
+  useEffect(() => setRate(loadRate()), []);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.defaultPlaybackRate = rate;
+    v.playbackRate = rate;
+  }, [rate, src]);
+  const changeRate = useCallback((r: number) => {
+    setRate(r);
+    saveRate(r);
+  }, []);
+
   const toggle = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -134,7 +170,9 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
 
   const seekBy = (delta: number) => {
     const v = videoRef.current;
-    if (v) v.currentTime = Math.min(Math.max(0, v.currentTime + delta), v.duration || 0);
+    if (!v) return;
+    clipEnd.current = null;
+    v.currentTime = Math.min(Math.max(0, v.currentTime + delta), v.duration || 0);
   };
 
   const onVideoKey = (e: KeyboardEvent) => {
@@ -147,6 +185,10 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
       seekBy(SKIP_SECONDS);
+    } else if (e.key === "<" || e.key === ">") {
+      e.preventDefault();
+      const i = PLAYBACK_RATES.indexOf(rate) + (e.key === ">" ? 1 : -1);
+      changeRate(PLAYBACK_RATES[Math.min(PLAYBACK_RATES.length - 1, Math.max(0, i))]);
     }
   };
 
@@ -208,17 +250,23 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
           ref={videoRef}
           src={src}
           tabIndex={0}
-          aria-label={`${title} lecture video. Press space to play or pause, left and right arrows to skip ${SKIP_SECONDS} seconds.`}
+          aria-label={`${title} lecture video. Press space to play or pause, left and right arrows to skip ${SKIP_SECONDS} seconds, less-than and greater-than to change speed.`}
           onKeyDown={onVideoKey}
           onClick={toggle}
           onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
+          onPause={() => {
+            setPlaying(false);
+            clipEnd.current = null;
+          }}
           onTimeUpdate={(e) => {
             setTime(e.currentTarget.currentTime);
             syncCue();
           }}
           onSeeked={syncCue}
-          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+          onLoadedMetadata={(e) => {
+            setDuration(e.currentTarget.duration);
+            e.currentTarget.playbackRate = rate;
+          }}
           onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
           onError={() => setError(true)}
           playsInline
@@ -278,6 +326,7 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
           value={Math.min(time, duration || 0)}
           onChange={(e) => {
             const t = Number(e.target.value);
+            clipEnd.current = null;
             if (videoRef.current) videoRef.current.currentTime = t;
             setTime(t);
           }}
@@ -314,6 +363,7 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
         >
           <SettingsIcon />
         </button>
+        <SpeedMenu rate={rate} onChange={changeRate} />
         {canFullscreen && (
           <button
             type="button"
