@@ -94,14 +94,14 @@ export function Workspace() {
         )}
       </AnimatePresence>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]">
+      <div className="grid items-start gap-6 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <motion.section
           aria-label="Lecture video"
           initial={{ opacity: 0, x: -24 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.45, ease: "easeOut" }}
           // On small screens the video stays pinned while you scroll the transcript below it.
-          className="max-lg:sticky max-lg:top-2 max-lg:z-30"
+          className="max-md:sticky max-md:top-2 max-md:z-30"
         >
           <VideoPlayer
             src={lecture.videoUrl}
@@ -119,7 +119,7 @@ export function Workspace() {
           initial={{ opacity: 0, x: 24 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.45, ease: "easeOut", delay: 0.08 }}
-          className="lg:sticky lg:top-8 lg:max-h-[calc(100dvh-4rem)]"
+          className="md:sticky md:top-8 md:max-h-[calc(100dvh-4rem)]"
         >
           <SidePanel
             pipeline={state}

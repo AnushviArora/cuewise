@@ -201,7 +201,7 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
       <div
         ref={boxRef}
         className={`relative bg-black [container-type:inline-size] ${
-          fullscreen ? "min-h-0 flex-1" : "aspect-video max-lg:max-h-[45dvh]"
+          fullscreen ? "min-h-0 flex-1" : "aspect-video max-md:max-h-[45dvh]"
         }`}
       >
         <video
