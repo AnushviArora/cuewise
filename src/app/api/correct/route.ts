@@ -17,6 +17,7 @@ Rules:
 - "original" must be copied exactly from the caption text. Report each distinct wrong word once per caption.
 - confidence "high": a clear, unambiguous match. "medium": plausible but could be a different real word. "low": possible match, you can't tell. Use medium/low freely — a human will review them.
 - If a word might be a glossary term but you can't tell, report it with low confidence rather than guessing high.
+- Capitalization alone is NOT an error. Never report a word that is already right apart from upper/lower case ("linear combinations" is correct; do not change it to "Linear Combinations"). Glossary entries copied from slide titles are often in Title Case; in a sentence, ordinary terms stay lowercase. Write "corrected" lowercase unless the term is a person's name, a place, an acronym or always capitalized.
 - If nothing needs fixing, return an empty list. Most captions need no edits.`;
 
 const SCHEMA = {

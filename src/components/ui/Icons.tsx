@@ -57,6 +57,21 @@ export const ArrowRightIcon = (p: P) => (
 export const CheckIcon = (p: P) => (
   <svg {...base(p)}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
 );
+export const DownloadIcon = (p: P) => (
+  <svg {...base(p)}><path d="M12 4v11m0 0-5-5m5 5 5-5" /><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" /></svg>
+);
+export const ArrowLeftIcon = (p: P) => (
+  <svg {...base(p)}><path d="M19 12H5m6-6-6 6 6 6" /></svg>
+);
+export const ReplayIcon = (p: P) => (
+  <svg {...base(p)}><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4h4" /></svg>
+);
+export const UndoIcon = (p: P) => (
+  <svg {...base(p)}><path d="M9 14 4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></svg>
+);
+export const TranscriptIcon = (p: P) => (
+  <svg {...base(p)}><path d="M5 6h14M5 11h14M5 16h9" /></svg>
+);
 export const SettingsIcon = (p: P) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>
 );

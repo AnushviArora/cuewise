@@ -42,7 +42,23 @@ export interface CaptionEdit {
   confidence: Confidence;
   reason: string;
   status: "applied" | "needs_review";
+  /**
+   * The only change is capitalization that is genuinely required (a name or acronym), e.g.
+   * "matlab" -> "MATLAB". Applied silently: not a real correction, so it is never shown in
+   * Review or counted as a fix.
+   */
+  caseOnly?: boolean;
 }
+
+/** A professor's decision on one edit. Without a decision, an edit keeps its default behaviour. */
+export interface EditDecision {
+  kind: "accepted" | "edited" | "kept";
+  /** What the transcript shows for this word: suggestion, typed text, or the original. */
+  text: string;
+}
+
+/** Where an edit stands: "auto" = fixed automatically, "pending" = awaiting review. */
+export type EditState = "auto" | "pending" | EditDecision["kind"];
 
 export interface CaptionResult {
   cues: CaptionCue[];
@@ -54,6 +70,8 @@ export interface CaptionResult {
   documentsUsed: number;
   /** Names of uploaded documents with no readable text (e.g. scanned images). */
   documentsSkipped: string[];
+  /** Documents whose term check failed even though they were readable. */
+  documentsFailed?: string[];
   /** Slides were uploaded but checking them failed; captions are the raw transcript. */
   slidesError?: string;
 }

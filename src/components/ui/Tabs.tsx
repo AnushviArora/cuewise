@@ -13,9 +13,25 @@ export interface TabItem {
  * Accessible tabs (WAI-ARIA "tabs" pattern): roving tabindex, Arrow/Home/End
  * keys, animated indicator and cross-fade between panels.
  */
-export function Tabs({ items, label }: { items: TabItem[]; label: string }) {
+export function Tabs({
+  items,
+  label,
+  value,
+  onValueChange,
+}: {
+  items: TabItem[];
+  label: string;
+  /** Optional controlled selection, so other parts of the page can open a tab. */
+  value?: string;
+  onValueChange?: (id: string) => void;
+}) {
   const uid = useId();
-  const [active, setActive] = useState(items[0].id);
+  const [inner, setInner] = useState(items[0].id);
+  const active = value ?? inner;
+  const setActive = (id: string) => {
+    setInner(id);
+    onValueChange?.(id);
+  };
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const select = (id: string) => {

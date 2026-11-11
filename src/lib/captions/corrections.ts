@@ -3,6 +3,8 @@ import type {
   CaptionEdit,
   CaptionMark,
   Confidence,
+  EditDecision,
+  EditState,
   SlideTerm,
 } from "./types";
 
@@ -107,33 +109,60 @@ export function validateEdits(
 
     const confident =
       e.confidence === "high" && similarity(original, corrected) >= MIN_AUTO_APPLY_SIMILARITY;
-    out.push({
-      cueId: cue.id,
-      original,
-      corrected,
-      term: matched.term,
-      confidence: e.confidence,
-      reason: (e.reason ?? "").slice(0, 200),
-      status: confident ? "applied" : "needs_review",
-    });
+    const clean = cleanEdit(
+      {
+        cueId: cue.id,
+        original,
+        corrected,
+        term: matched.term,
+        confidence: e.confidence,
+        reason: (e.reason ?? "").slice(0, 200),
+        status: confident ? "applied" : "needs_review",
+      },
+      terms,
+    );
+    if (clean) out.push(clean);
   }
   return out;
 }
 
-/**
- * Applies validated edits to cues WITHOUT touching anything else: only the matched
- * words are replaced, timestamps are kept, and `marks` record where each edit landed
- * in the final text (for highlighting). Returns cues plus edits with stable ids.
- */
-export function applyEdits(
-  cues: CaptionCue[],
-  edits: Omit<CaptionEdit, "id">[],
-): { cues: CaptionCue[]; edits: CaptionEdit[] } {
-  const withIds: CaptionEdit[] = edits.map((e, i) => ({ ...e, id: `e${i + 1}` }));
-  const byCue = new Map<string, CaptionEdit[]>();
-  for (const e of withIds) byCue.set(e.cueId, [...(byCue.get(e.cueId) ?? []), e]);
+/** What the edit puts in the text, or null to leave the transcribed words as heard. */
+export function replacementFor(edit: CaptionEdit, decision?: EditDecision): string | null {
+  if (decision) {
+    return decision.kind === "kept" ? null : decision.kind === "edited" ? decision.text : edit.corrected;
+  }
+  return edit.status === "applied" ? edit.corrected : null;
+}
 
-  const outCues = cues.map((cue): CaptionCue => {
+export function editState(edit: CaptionEdit, decision?: EditDecision): EditState {
+  if (decision) return decision.kind;
+  return edit.status === "applied" ? "auto" : "pending";
+}
+
+/** Cues as transcribed: no corrections, no marks. */
+export function rawCues(cues: CaptionCue[]): CaptionCue[] {
+  return cues.map(({ id, start, end, text, originalText }) => ({
+    id,
+    start,
+    end,
+    text: originalText ?? text,
+  }));
+}
+
+/**
+ * Builds display cues from the RAW transcript plus edits and the professor's decisions.
+ * Only matched words are replaced, timestamps are kept, and `marks` record where each
+ * edit landed in the final text (for highlighting). Cheap enough to re-run on every decision.
+ */
+export function renderCues(
+  raw: CaptionCue[],
+  edits: CaptionEdit[],
+  decisions: Record<string, EditDecision> = {},
+): CaptionCue[] {
+  const byCue = new Map<string, CaptionEdit[]>();
+  for (const e of edits) byCue.set(e.cueId, [...(byCue.get(e.cueId) ?? []), e]);
+
+  return raw.map((cue): CaptionCue => {
     const list = byCue.get(cue.id);
     if (!list) return cue;
 
@@ -151,29 +180,83 @@ export function applyEdits(
     const marks: CaptionMark[] = [];
     for (const s of spans) {
       text += cue.text.slice(cursor, s.start);
-      const piece = s.edit.status === "applied" ? s.edit.corrected : cue.text.slice(s.start, s.end);
+      const piece = replacementFor(s.edit, decisions[s.edit.id]) ?? cue.text.slice(s.start, s.end);
       marks.push({ start: text.length, end: text.length + piece.length, editId: s.edit.id });
       text += piece;
       cursor = s.end;
     }
     text += cue.text.slice(cursor);
 
-    return {
-      ...cue,
-      text,
-      marks,
-      originalText: text !== cue.text ? cue.text : undefined,
-    };
+    return { ...cue, text, marks, originalText: text !== cue.text ? cue.text : undefined };
   });
-
-  return { cues: outCues, edits: withIds };
 }
 
-export function summarize(edits: CaptionEdit[]) {
-  return {
-    fixed: edits.filter((e) => e.status === "applied").length,
-    needsReview: edits.filter((e) => e.status === "needs_review").length,
-  };
+/**
+ * Ids derived from the cue ("c12.1"), not from arrival order, so they never change as
+ * sections finish in any order and decisions made on an edit stay attached to it.
+ */
+export function withStableIds(edits: Omit<CaptionEdit, "id">[]): CaptionEdit[] {
+  const seen = new Map<string, number>();
+  return edits.map((e) => {
+    const n = (seen.get(e.cueId) ?? 0) + 1;
+    seen.set(e.cueId, n);
+    return { ...e, id: `${e.cueId}.${n}` };
+  });
+}
+
+/**
+ * True when the term is written with capitals in running text too: people and places
+ * ("Strang"), acronyms ("MATLAB", "SVD"), and mixed-case names ("ReLU", "LaTeX").
+ * Title Case copied from a slide heading ("Linear Combinations") does NOT count.
+ */
+export function needsCapitals(term: string, kind?: SlideTerm["kind"]): boolean {
+  if (kind === "name") return true;
+  const letters = term.replace(/[^\p{L}]/gu, "");
+  if (letters.length >= 2 && letters === letters.toUpperCase()) return true; // acronym
+  return /\p{Ll}\p{Lu}/u.test(term); // capital inside a word
+}
+
+/**
+ * Makes one edit a REAL correction or drops it. Differences in capitalization alone are
+ * not corrections: ordinary terms are written in lowercase in a sentence (capitalized only
+ * where the heard word was, i.e. at a sentence start), while names and acronyms keep the
+ * slides' capitals. Returns null when nothing would change, or when the only change is
+ * capitalization that wasn't confident enough to apply silently.
+ */
+export function cleanEdit(
+  e: Omit<CaptionEdit, "id">,
+  terms: SlideTerm[],
+): Omit<CaptionEdit, "id"> | null {
+  // A misheard word is about as long as the real one. If the lengths differ by more than 2x
+  // it isn't a misspelling: the model swapped a phrase for a different, longer or shorter
+  // term (e.g. "Introduction" -> a whole book title), which would damage the sentence.
+  const heard = squash(e.original).length;
+  const real = squash(e.corrected).length;
+  if (heard === 0 || real / heard > 2 || real / heard < 0.5) return null;
+
+  const kind = terms.find((t) => norm(t.term) === norm(e.term))?.kind;
+  let corrected = e.corrected;
+  if (!needsCapitals(e.term, kind)) {
+    corrected = corrected.toLowerCase();
+    if (/^\p{Lu}/u.test(e.original) && corrected) corrected = corrected[0].toUpperCase() + corrected.slice(1);
+  }
+  if (corrected === e.original) return null;
+  const caseOnly = corrected.toLowerCase() === e.original.toLowerCase();
+  if (caseOnly && e.status !== "applied") return null;
+  return { ...e, corrected, caseOnly: caseOnly || undefined };
+}
+
+export function cleanEdits(edits: Omit<CaptionEdit, "id">[], terms: SlideTerm[]) {
+  return edits.flatMap((e) => cleanEdit(e, terms) ?? []);
+}
+
+/** Gives validated edits stable ids and applies them to the raw transcript. */
+export function applyEdits(
+  cues: CaptionCue[],
+  edits: Omit<CaptionEdit, "id">[],
+): { cues: CaptionCue[]; edits: CaptionEdit[] } {
+  const withIds: CaptionEdit[] = edits.map((e, i) => ({ ...e, id: `e${i + 1}` }));
+  return { cues: renderCues(cues, withIds), edits: withIds };
 }
 
 /** Binary search for the cue showing at time `t` (cues are sorted, non-overlapping). */

@@ -23,7 +23,7 @@ const MAX_TERMS = 150;
 
 const SYSTEM = `You build a glossary from lecture documents (slides, lecture notes, handouts), to help fix speech-to-text errors.
 List words and short phrases that a speech recognizer would likely get wrong:
-- "name": people, authors, places, organizations, product names
+- "name": people, authors, places, organizations, product names, and terms named after people (Gram-Schmidt, Cayley-Hamilton)
 - "technical": technical vocabulary, notation read aloud, acronyms, foreign or Latinized terms
 - "course": course-specific jargon and coined terms
 Rules: copy each term EXACTLY as spelled in the documents. Skip common everyday English words, boilerplate, page numbers and URLs. Max 4 words per term. No duplicates across documents. Order the list by importance: terms that are central to the lecture or appear in several documents come first.`;

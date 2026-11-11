@@ -38,9 +38,9 @@ interface Props {
 
 /** Progress steps shown while captions are being made, or a friendly error with retry. */
 export function ProcessingCard({ state, hasSlides, onRetry }: Props) {
-  const steps = hasSlides
-    ? ALL_STEPS
-    : ALL_STEPS.filter((s) => s.id === "transcribe" || s.id === "done");
+  // Reading documents runs alongside transcription, and term checking continues after
+  // captions appear (see CheckStatus), so only transcription blocks here.
+  const steps = ALL_STEPS.filter((s) => s.id === "transcribe" || s.id === "done");
   const current = steps.findIndex((s) => s.id === state.step);
   const failed = state.status === "error";
 
@@ -121,11 +121,9 @@ export function ProcessingCard({ state, hasSlides, onRetry }: Props) {
               className="mt-4 text-sm text-muted"
             >
               {state.detail ??
-                (state.step === "slides"
-                  ? "Picking out names and technical terms from your documents"
-                  : state.step === "terms"
-                    ? "Fixing misheard terms, leaving everything else as spoken"
-                    : "")}
+                (hasSlides
+                  ? "Listening to the lecture while reading your documents"
+                  : "Listening to the lecture")}
             </motion.p>
           )}
         </AnimatePresence>

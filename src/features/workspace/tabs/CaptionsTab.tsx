@@ -1,10 +1,11 @@
 "use client";
 
-import { summarize } from "@/lib/captions/corrections";
 import type { CaptionResult } from "@/lib/captions/types";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
-import type { PipelineState } from "@/features/captions/useCaptionPipeline";
+import type { Checking, PipelineState, StepFailure } from "@/features/captions/useCaptionPipeline";
+import { CueText, MarkerLegend } from "@/features/review/CueText";
+import type { ReviewModel } from "@/features/review/useCaptionReview";
 
 const fmt = (t: number) => {
   const m = Math.floor(t / 60);
@@ -14,8 +15,11 @@ const fmt = (t: number) => {
 
 interface Props {
   pipeline: PipelineState;
+  onRetry: () => void;
+  review: ReviewModel;
   activeCueId: string | null;
   onSeek: (seconds: number) => void;
+  onOpenReview: (editId?: string) => void;
 }
 
 const card = "rounded-2xl border border-white/10 bg-black/20 p-4";
@@ -24,8 +28,21 @@ const Note = ({ children }: { children: React.ReactNode }) => (
 );
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-function Summary({ result }: { result: CaptionResult }) {
-  const { fixed, needsReview } = summarize(result.edits);
+function Summary({
+  result,
+  review,
+  checking,
+  failure,
+  onRetry,
+}: {
+  result: CaptionResult;
+  review: ReviewModel;
+  checking: Checking | null;
+  failure: StepFailure | null;
+  onRetry: () => void;
+}) {
+  const fixed = review.autoFixed;
+  const needsReview = review.pending;
   const { documentsUploaded, documentsUsed, documentsSkipped } = result;
 
   if (documentsUploaded === 0) {
@@ -42,11 +59,31 @@ function Summary({ result }: { result: CaptionResult }) {
       </div>
     );
   }
-  if (result.slidesError) {
+  if (failure) {
     return (
-      <div className={card}>
-        <p className="text-sm font-medium">Transcript ready, terms not checked</p>
-        <Note>{result.slidesError}</Note>
+      <div className="rounded-2xl border border-danger/40 bg-danger/10 p-4">
+        <p className="text-sm font-medium">Transcript ready, terms not fully checked</p>
+        <Note>{failure.message}</Note>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 rounded-xl border border-edge bg-white/[0.06] px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-ink/60 hover:bg-white/[0.12]"
+        >
+          Try again
+        </button>
+        <Note>Only the failed step runs again. Your transcript is kept.</Note>
+      </div>
+    );
+  }
+  if (checking) {
+    return (
+      <div className="rounded-2xl border border-accent/30 bg-accent-soft p-4">
+        <p className="text-sm font-medium">
+          {checking.phase === "documents"
+            ? "Reading your documents…"
+            : `Checking terms… ${checking.done} of ${checking.total} sections`}
+        </p>
+        <Note>Your transcript is ready. Corrections appear as each section finishes.</Note>
       </div>
     );
   }
@@ -73,22 +110,25 @@ function Summary({ result }: { result: CaptionResult }) {
         Checked against {plural(result.terms.length, "term")} from your {documentsUsed === 1 ? "document" : "documents"}.
         {documentsSkipped.length > 0 &&
           ` Skipped ${documentsSkipped.length} with no readable text: ${documentsSkipped.join(", ")}.`}
+        {(result.documentsFailed?.length ?? 0) > 0 &&
+          ` Couldn’t check ${result.documentsFailed!.join(", ")}; try uploading again.`}
       </Note>
     </div>
   );
 }
 
 function Transcript({
-  result,
+  review,
   activeCueId,
   onSeek,
+  onOpenReview,
 }: {
-  result: CaptionResult;
+  review: ReviewModel;
   activeCueId: string | null;
   onSeek: (seconds: number) => void;
+  onOpenReview: (editId: string) => void;
 }) {
   const listRef = useRef<HTMLOListElement>(null);
-  const editById = new Map(result.edits.map((e) => [e.id, e]));
 
   // Keep the current line visible, scrolling only this list (never the page).
   useEffect(() => {
@@ -107,49 +147,32 @@ function Transcript({
       aria-label="Transcript"
       className="relative max-h-72 space-y-0.5 overflow-y-auto rounded-2xl border border-white/10 bg-black/20 p-1.5"
     >
-      {result.cues.map((cue) => {
-        const parts: React.ReactNode[] = [];
-        let at = 0;
-        for (const m of cue.marks ?? []) {
-          const edit = editById.get(m.editId);
-          if (!edit) continue;
-          parts.push(cue.text.slice(at, m.start));
-          const applied = edit.status === "applied";
-          parts.push(
-            <mark
-              key={m.start}
-              title={
-                applied
-                  ? `Corrected from “${edit.original}” to match “${edit.term}” in your documents`
-                  : `Might be “${edit.corrected}” (from your documents) — needs review`
-              }
-              className={`rounded px-0.5 text-inherit ${
-                applied
-                  ? "bg-accent/20 underline decoration-accent/60 decoration-1 underline-offset-2"
-                  : "bg-amber-300/15 underline decoration-amber-300/70 decoration-dotted underline-offset-2"
-              }`}
-            >
-              {cue.text.slice(m.start, m.end)}
-            </mark>,
-          );
-          at = m.end;
-        }
-        parts.push(cue.text.slice(at));
+      {review.cues.map((cue) => {
         const active = cue.id === activeCueId;
         return (
-          <li key={cue.id} data-cue={cue.id}>
+          <li
+            key={cue.id}
+            data-cue={cue.id}
+            onClick={() => onSeek(cue.start + 0.01)}
+            className={`flex cursor-pointer gap-3 rounded-xl px-3 py-2 text-sm leading-relaxed transition-colors ${
+              active ? "bg-white/10 text-ink" : "text-muted hover:bg-white/[0.06] hover:text-ink"
+            }`}
+          >
             <button
               type="button"
-              onClick={() => onSeek(cue.start + 0.01)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSeek(cue.start + 0.01);
+              }}
               aria-current={active ? "true" : undefined}
               aria-label={`Jump to ${fmt(cue.start)}`}
-              className={`flex w-full gap-3 rounded-xl px-3 py-2 text-left text-sm leading-relaxed transition-colors ${
-                active ? "bg-white/10 text-ink" : "text-muted hover:bg-white/[0.06] hover:text-ink"
-              }`}
+              className="mt-px w-9 shrink-0 text-left text-xs tabular-nums text-subtle hover:text-ink"
             >
-              <span className="mt-px w-9 shrink-0 text-xs tabular-nums text-subtle">{fmt(cue.start)}</span>
-              <span>{parts}</span>
+              {fmt(cue.start)}
             </button>
+            <span>
+              <CueText cue={cue} review={review} onMarkClick={onOpenReview} />
+            </span>
           </li>
         );
       })}
@@ -157,18 +180,29 @@ function Transcript({
   );
 }
 
-export function CaptionsTab({ pipeline, activeCueId, onSeek }: Props) {
+export function CaptionsTab({
+  pipeline,
+  onRetry,
+  review,
+  activeCueId,
+  onSeek,
+  onOpenReview,
+}: Props) {
+
   return (
     <div className="space-y-6">
       {pipeline.status === "done" ? (
         <section aria-label="Transcript" className="space-y-3">
-          <Summary result={pipeline.result} />
-          <Transcript result={pipeline.result} activeCueId={activeCueId} onSeek={onSeek} />
-          <p className="text-xs text-muted">
-            Select a line to jump there.{" "}
-            <span className="rounded bg-accent/20 px-1">Highlighted</span> words were corrected from
-            your documents; <span className="rounded bg-amber-300/15 px-1">dotted</span> ones need review.
-          </p>
+          <Summary
+            result={pipeline.result}
+            review={review}
+            checking={pipeline.checking}
+            failure={pipeline.failure}
+            onRetry={onRetry}
+          />
+          <Transcript review={review} activeCueId={activeCueId} onSeek={onSeek} onOpenReview={onOpenReview} />
+          <p className="text-xs text-muted">Select a line to jump there. Select a marked word to review it.</p>
+          <MarkerLegend />
         </section>
       ) : (
         <p className={`${card} text-sm text-muted`}>
