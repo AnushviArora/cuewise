@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useId, useRef, useState, type DragEvent } from "react";
 import { AlertIcon, CloseIcon, FileIcon } from "@/components/ui/Icons";
+import { ACCEPT_ATTR } from "@/lib/documents";
 import { formatBytes, MAX_SLIDES_FILES } from "@/lib/validation";
 
 interface Props {
@@ -12,7 +13,7 @@ interface Props {
   onRemove: (index: number) => void;
 }
 
-/** Multi-PDF picker: click or drop several files at once, add more later, remove any with ×. */
+/** Multi-file picker (PDF, PowerPoint, Word, text, Markdown, code): click or drop several at once, add more later, remove any with ×. */
 export function DocumentsDropzone({ files, messages, onAdd, onRemove }: Props) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,7 +62,7 @@ export function DocumentsDropzone({ files, messages, onAdd, onRemove }: Props) {
           id={id}
           type="file"
           multiple
-          accept="application/pdf,.pdf"
+          accept={ACCEPT_ATTR}
           aria-describedby={describedBy}
           onChange={(e) => take(e.target.files)}
           className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
@@ -73,7 +74,7 @@ export function DocumentsDropzone({ files, messages, onAdd, onRemove }: Props) {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-ink">
-              {files.length ? "Add more PDFs" : "Drop PDFs here, or "}
+              {files.length ? "Add more files" : "Drop files here, or "}
               {!files.length && (
                 <span className="text-accent underline underline-offset-2">browse</span>
               )}
@@ -81,7 +82,7 @@ export function DocumentsDropzone({ files, messages, onAdd, onRemove }: Props) {
             <p id={`${id}-hint`} className="text-xs text-muted">
               {full
                 ? `You’ve reached the ${MAX_SLIDES_FILES}-document limit.`
-                : `Up to ${MAX_SLIDES_FILES} PDFs, 50 MB each. Names and terms from all of them improve the captions.`}
+                : `Up to ${MAX_SLIDES_FILES} files: PDF, PowerPoint (.pptx), Word (.docx), text, Markdown and code. Names and terms from all of them improve the captions.`}
             </p>
           </div>
         </div>

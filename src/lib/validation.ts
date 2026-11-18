@@ -1,5 +1,7 @@
+import { validateDocument } from "./documents";
+
 export const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB
-export const MAX_SLIDES_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_SLIDES_BYTES = 50 * 1024 * 1024; // 50 MB (PDF limit; other formats: see lib/documents.ts)
 export const MAX_SLIDES_FILES = 15;
 export const MAX_COURSE_NAME = 120;
 
@@ -58,13 +60,8 @@ export function addSlideFiles(
   return { files, messages };
 }
 
-/** One PDF is valid when it's a PDF under the size limit. */
+/** One document is valid when it is a supported type under that type's size limit. */
 export function validateSlides(file: File | null): string | null {
   if (!file) return null;
-  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-  if (!isPdf) return `“${file.name}” isn’t a PDF. Export your slides as a PDF and try again.`;
-  if (file.size > MAX_SLIDES_BYTES) {
-    return `That PDF is ${formatBytes(file.size)}. The limit is ${mb(MAX_SLIDES_BYTES)}.`;
-  }
-  return null;
+  return validateDocument(file);
 }

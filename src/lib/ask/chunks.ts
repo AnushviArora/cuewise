@@ -20,6 +20,8 @@ export interface Chunk {
   /** Document only. */
   doc?: string;
   page?: number;
+  /** Document only: "Slide 7", a section heading or "lines 12-30" (absent for PDFs). */
+  locator?: string;
 }
 
 /** About 45 seconds of speech per chunk, half overlapping, so a moment is never split in two. */
@@ -67,10 +69,11 @@ export function slideChunks(pages: SlidePage[]): Chunk[] {
         id: `S${out.length + 1}`,
         kind: "slide",
         text,
-        embedText: `${p.doc}, page ${p.page}: ${text}`,
-        label: `${p.doc}, page ${p.page}`,
+        embedText: `${p.doc}, ${p.locator ?? `page ${p.page}`}: ${text}`,
+        label: `${p.doc}, ${p.locator ?? `page ${p.page}`}`,
         doc: p.doc,
         page: p.page,
+        locator: p.locator,
       });
     }
   }

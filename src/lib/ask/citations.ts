@@ -1,3 +1,5 @@
+import type { Chunk } from "./chunks";
+
 export const NOT_COVERED = "This lecture doesn't seem to cover that.";
 
 export type Segment = { kind: "text"; text: string } | { kind: "cite"; ids: string[] };
@@ -44,4 +46,20 @@ export function citedIds(text: string, valid: Set<string>): string[] {
   const ids: string[] = [];
   for (const s of parseAnswer(text, valid, false)) if (s.kind === "cite") for (const id of s.ids) if (!ids.includes(id)) ids.push(id);
   return ids;
+}
+
+/**
+ * Sources to show when an answer forgot its [T4]/[S2] markers. If the answer names a document
+ * that was sent ("solver.py", "lines 5-8"), those passages are the likely sources; otherwise the
+ * best-matching passages are. Callers label these honestly as "related", not "cited".
+ */
+export function closestSources(answer: string, hits: Chunk[], ranked: Chunk[], limit = 3): Chunk[] {
+  const text = answer.toLowerCase();
+  const named = hits.filter((c) => c.kind === "slide" && c.doc && text.includes(c.doc.toLowerCase()));
+  if (named.length > 0) {
+    const exact = (c: Chunk) => (c.locator && text.includes(c.locator.toLowerCase()) ? 0 : 1);
+    const rank = (c: Chunk) => ranked.findIndex((r) => r.id === c.id);
+    return [...named].sort((a, b) => exact(a) - exact(b) || rank(a) - rank(b)).slice(0, limit);
+  }
+  return ranked.slice(0, limit);
 }

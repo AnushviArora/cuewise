@@ -128,7 +128,7 @@ export function UploadForm() {
 
           <div className="flex flex-col-reverse items-stretch gap-4 pt-1 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs leading-relaxed text-subtle">
-              Your video stays in your browser. Only its audio and your slides’ text are sent to OpenAI to make captions.
+              Your video stays in your browser. Only its audio and your documents’ text are sent to OpenAI to make captions.
             </p>
             <Button type="submit">
               Open workspace <ArrowRightIcon width={18} height={18} />

@@ -64,9 +64,15 @@ export type EditState = "auto" | "pending" | EditDecision["kind"];
 export interface SlidePage {
   /** File name, e.g. "lecture3.pdf". */
   doc: string;
-  /** 1-based page (slide) number. */
+  /** 1-based page (slide) number; for other formats, the position of this passage in the file. */
   page: number;
   text: string;
+  /**
+   * Where in the file this passage is, as shown to people: "Slide 7" (PowerPoint), a section
+   * heading (Word, Markdown) or "lines 12-30" (code, text). Absent for PDFs, which are
+   * cited by page number as before.
+   */
+  locator?: string;
 }
 
 export interface CaptionResult {

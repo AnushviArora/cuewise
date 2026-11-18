@@ -3,6 +3,8 @@ import type { Chunk } from "./chunks";
 export interface Retrieval {
   /** The most relevant chunks, transcript in time order, then documents. */
   hits: Chunk[];
+  /** The same chunks, best match first (used to pick sources when an answer forgets to cite). */
+  ranked: Chunk[];
   /** False when nothing in the lecture is close enough: don't ask the model at all. */
   covered: boolean;
   method: "semantic" | "keyword";
@@ -11,7 +13,8 @@ export interface Retrieval {
 }
 
 const TRANSCRIPT_HITS = 6;
-const SLIDE_HITS = 3;
+/** Document passages (slides, notes, code...) compete across ALL uploaded files, so allow a few more than transcript neighbours. */
+const SLIDE_HITS = 5;
 /** Below this the lecture is treated as not covering the question. Tuned on real embeddings. */
 export const COVER_MIN_SEMANTIC = 0.3;
 export const COVER_MIN_KEYWORD = 0.34;
@@ -109,7 +112,8 @@ export function retrieve(
   queryVector: ArrayLike<number> | null,
 ): Retrieval {
   if (chunks.length > 0 && isOverviewQuestion(question)) {
-    return { hits: overviewHits(chunks), covered: true, method: "keyword", best: 1 };
+    const hits = overviewHits(chunks);
+    return { hits, ranked: hits, covered: true, method: "keyword", best: 1 };
   }
   const semantic = !!vectors && !!queryVector && vectors.length === chunks.length;
   const scores = semantic
@@ -118,7 +122,7 @@ export function retrieve(
   const best = Math.max(0, ...scores);
   const method = semantic ? "semantic" : "keyword";
   const covered = best >= (semantic ? COVER_MIN_SEMANTIC : COVER_MIN_KEYWORD);
-  if (!covered) return { hits: [], covered: false, method, best };
+  if (!covered) return { hits: [], ranked: [], covered: false, method, best };
 
   const floor = best - (semantic ? KEEP_MARGIN_SEMANTIC : KEEP_MARGIN_KEYWORD);
   const ranked = chunks.map((c, i) => ({ c, s: scores[i] })).sort((a, b) => b.s - a.s);
@@ -135,5 +139,7 @@ export function retrieve(
   const slides = pick("slide", SLIDE_HITS).sort(
     (a, b) => (a.doc ?? "").localeCompare(b.doc ?? "") || (a.page ?? 0) - (b.page ?? 0),
   );
-  return { hits: [...transcript, ...slides], covered: true, method, best };
+  const hits = [...transcript, ...slides];
+  const chosen = new Set(hits.map((h) => h.id));
+  return { hits, ranked: ranked.map((r) => r.c).filter((c) => chosen.has(c.id)), covered: true, method, best };
 }

@@ -5,7 +5,9 @@ import type { SlidePage, SlideTerm, SlideTermKind } from "@/lib/captions/types";
 import { getOpenAIKey } from "@/lib/server/env";
 import { apiError, badRequest, OpenAIError } from "@/lib/server/http";
 import { chatJsonRaw } from "@/lib/server/openai";
-import { MAX_SLIDES_BYTES, MAX_SLIDES_FILES } from "@/lib/validation";
+import { DOC_LIMITS, docKindOf, validateDocument, type DocKind } from "@/lib/documents";
+import { DocumentError, parseDocument, type Unit } from "@/lib/server/documents";
+import { MAX_SLIDES_FILES } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -92,6 +94,42 @@ function cleanPages(name: string, pages: string[]): SlidePage[] {
     .filter((p) => p.text.replace(/\s+/g, "").length >= 20);
 }
 
+/**
+ * Merges per-document term lists round-robin so every document is represented, then
+ * de-duplicates (case/punctuation-insensitive), keeping each document's relevance order.
+ */
+function mergeTerms(lists: SlideTerm[][]): SlideTerm[] {
+  const seen = new Set<string>();
+  const terms: SlideTerm[] = [];
+  for (let rank = 0; terms.length < MAX_TERMS; rank++) {
+    let any = false;
+    for (const list of lists) {
+      const t = list[rank];
+      if (!t) continue;
+      any = true;
+      const key = t.term.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      terms.push(t);
+      if (terms.length >= MAX_TERMS) break;
+    }
+    if (!any) break;
+  }
+  return terms;
+}
+
+interface Extracted {
+  name: string;
+  kind: DocKind;
+  /** Text per page (PDF) or per passage (other formats). */
+  pages: string[];
+  /** Non-PDF formats: passages with their locators ("Slide 7", "lines 12-30"). */
+  units?: Unit[];
+  /** Code files: names found in the file itself (no AI needed). */
+  codeTerms: SlideTerm[];
+  ok: boolean;
+}
+
 /** Runs `fn` over `items`, at most `limit` at a time, keeping result order. */
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
@@ -144,30 +182,51 @@ async function termsForDoc(
 export async function POST(req: Request) {
   try {
     const t0 = performance.now();
-    getOpenAIKey(); // fail fast with a friendly error before parsing PDFs
+    getOpenAIKey(); // fail fast with a friendly error before parsing documents
     const form = await req.formData();
     const files = form.getAll("slides").filter((f): f is File => f instanceof File && f.size > 0);
     if (files.length === 0) return badRequest("No documents were provided.");
     if (files.length > MAX_SLIDES_FILES) {
       return badRequest(`You can add up to ${MAX_SLIDES_FILES} documents.`);
     }
-    if (files.some((f) => f.size > MAX_SLIDES_BYTES)) return badRequest("A PDF is too large.");
+    for (const f of files) {
+      const kind = docKindOf(f.name, f.type);
+      if (!kind) return badRequest(validateDocument(f) ?? "That file type isn’t supported.");
+      if (f.size > DOC_LIMITS[kind]) {
+        return badRequest(kind === "pdf" ? "A PDF is too large." : (validateDocument(f) ?? "A file is too large."));
+      }
+    }
     const course = String(form.get("courseName") ?? "").slice(0, 120);
 
-    // Extract all PDFs in parallel; one unreadable file shouldn't sink the rest.
-    const extracted = await Promise.all(
-      files.map(async (file) => {
+    // Read all files in parallel; one unreadable file shouldn't sink the rest.
+    const extracted: Extracted[] = await Promise.all(
+      files.map(async (file): Promise<Extracted> => {
+        const kind = docKindOf(file.name, file.type) as DocKind;
+        if (kind !== "pdf") {
+          // PowerPoint, Word, Markdown, text and code: read as plain text, never executed.
+          try {
+            const parsed = await parseDocument(file, kind);
+            return { name: file.name, kind, pages: parsed.units.map((u) => u.text), units: parsed.units, codeTerms: parsed.terms, ok: true };
+          } catch (e) {
+            if (!(e instanceof DocumentError)) throw e;
+            return { name: file.name, kind, pages: [], units: [], codeTerms: [], ok: false };
+          }
+        }
         try {
           const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
           const out = await extractText(pdf, { mergePages: false });
-          return { name: file.name, pages: out.text, ok: true as const };
+          return { name: file.name, kind, pages: out.text, codeTerms: [], ok: true };
         } catch {
-          return { name: file.name, pages: [] as string[], ok: false as const };
+          return { name: file.name, kind, pages: [], codeTerms: [], ok: false };
         }
       }),
     );
     if (extracted.every((d) => !d.ok)) {
-      return badRequest("Those PDFs couldn’t be read. Try re-exporting them as PDF.");
+      return badRequest(
+        extracted.every((d) => d.kind === "pdf")
+          ? "Those PDFs couldn’t be read. Try re-exporting them as PDF."
+          : "Those documents couldn’t be read. They may be corrupted, password-protected or empty.",
+      );
     }
 
     const seenLines = new Set<string>();
@@ -175,7 +234,8 @@ export async function POST(req: Request) {
       name: d.name,
       // Judged before de-duplication, so a copy of another document isn't called "unreadable".
       readable: d.pages.join("").replace(/\s+/g, "").length >= 20,
-      text: condense(d.pages, seenLines),
+      // Code files teach us names directly (below), so they skip the AI term extraction.
+      text: d.kind === "code" ? "" : condense(d.pages, seenLines),
     }));
     // Scanned/image-only documents have almost no text layer.
     const readable = docs.filter((d) => d.readable);
@@ -185,14 +245,26 @@ export async function POST(req: Request) {
     const pages: SlidePage[] = [];
     for (const d of extracted) {
       if (!d.ok || !readable.some((r) => r.name === d.name)) continue;
-      for (const p of cleanPages(d.name, d.pages)) {
+      const own: SlidePage[] = d.units
+        ? d.units.map((u, i) => ({ doc: d.name, page: i + 1, text: u.text, locator: u.locator }))
+        : cleanPages(d.name, d.pages);
+      for (const p of own) {
         if (budget < p.text.length) break;
         budget -= p.text.length;
         pages.push(p);
       }
     }
+    // Names from code files (function, class and variable names), most important first.
+    const codeLists = extracted
+      .filter((d) => d.ok && d.kind === "code" && d.codeTerms.length > 0 && readable.some((r) => r.name === d.name))
+      .map((d) => d.codeTerms);
     if (usable.length === 0) {
-      return NextResponse.json({ terms: [], documentsUsed: readable.length, skipped, pages } satisfies SlidesResponse);
+      return NextResponse.json({
+        terms: mergeTerms(codeLists),
+        documentsUsed: readable.length,
+        skipped,
+        pages,
+      } satisfies SlidesResponse);
     }
 
     const caps = allocate(
@@ -211,30 +283,13 @@ export async function POST(req: Request) {
       }
     });
     const failed = lists.filter((l) => l.terms === null);
-    if (failed.length === lists.length) throw (failed[0] as { error: unknown }).error;
+    // Only a failure when nothing at all (not even names from code files) could be learned.
+    if (failed.length === lists.length && codeLists.length === 0) throw (failed[0] as { error: unknown }).error;
 
-    // Merge round-robin so every document is represented, then de-duplicate
-    // (case/punctuation-insensitive), keeping each document's relevance order.
-    const ok = lists.map((l) => l.terms ?? []);
-    const seen = new Set<string>();
-    const terms: SlideTerm[] = [];
-    for (let rank = 0; terms.length < MAX_TERMS; rank++) {
-      let any = false;
-      for (const list of ok) {
-        const t = list[rank];
-        if (!t) continue;
-        any = true;
-        const key = t.term.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-        if (!key || seen.has(key)) continue;
-        seen.add(key);
-        terms.push(t);
-        if (terms.length >= MAX_TERMS) break;
-      }
-      if (!any) break;
-    }
+    const terms = mergeTerms([...lists.map((l) => l.terms ?? []), ...codeLists]);
     const t2 = performance.now();
     console.info(
-      `[timing] slides: read ${files.length} PDFs ${Math.round(t1 - t0)}ms, ` +
+      `[timing] slides: read ${files.length} files ${Math.round(t1 - t0)}ms, ` +
         `terms (${usable.length} docs, ${caps.reduce((a, b) => a + b, 0)} chars) ${Math.round(t2 - t1)}ms, ` +
         `${terms.length} terms${failed.length ? `, ${failed.length} failed` : ""}`,
     );

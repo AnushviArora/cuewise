@@ -1,6 +1,6 @@
 import { ApiRequestError, embedTexts, streamAnswer } from "@/lib/ai/client";
 import type { AskRequest } from "@/lib/ai/contracts";
-import { citedIds, isNotCovered, NOT_COVERED } from "./citations";
+import { citedIds, closestSources, isNotCovered, NOT_COVERED } from "./citations";
 import { getLectureContext } from "./lectureContext";
 import { retrieve } from "./retrieve";
 
@@ -113,7 +113,16 @@ async function execute(
       const c = byId.get(id)!;
       return c.kind === "transcript"
         ? { id, kind: "transcript", label: c.label.replace("transcript ", ""), title: c.label, start: c.start }
-        : { id, kind: "slide", label: `Slide ${c.page}${multiDoc ? ` · ${shortName(c.doc ?? "")}` : ""}`, title: c.label };
+        : {
+            id,
+            kind: "slide",
+            // PowerPoint, Word, text and code carry their own locator ("Slide 7", "lines 12-30") and
+            // always name the file; PDFs keep their page number and only name the file when ambiguous.
+            label: c.locator
+              ? `${c.locator} · ${shortName(c.doc ?? "")}`
+              : `Slide ${c.page}${multiDoc ? ` · ${shortName(c.doc ?? "")}` : ""}`,
+            title: c.label,
+          };
     };
     update({ phase: "Writing the answer…", refs: Object.fromEntries(sentIds.map((id) => [id, toRef(id)])) });
     let text = "";
@@ -134,7 +143,7 @@ async function execute(
     const cited = citedIds(text, valid);
     // The model is told to cite; if it didn't, show the closest passages and say so honestly.
     const related = cited.length === 0;
-    const ids = related ? sentIds.slice(0, 3) : cited;
+    const ids = related ? closestSources(text, found.hits, found.ranked).map((c) => c.id) : cited;
     update({ status: "done", sources: ids.map(toRef), related, truncated, notCovered: isNotCovered(text) });
   } catch (e) {
     const stopped = signal.aborted;
