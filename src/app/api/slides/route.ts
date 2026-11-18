@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractText, getDocumentProxy } from "unpdf";
 import type { SlidesResponse } from "@/lib/ai/contracts";
-import type { SlideTerm, SlideTermKind } from "@/lib/captions/types";
+import type { SlidePage, SlideTerm, SlideTermKind } from "@/lib/captions/types";
 import { getOpenAIKey } from "@/lib/server/env";
 import { apiError, badRequest, OpenAIError } from "@/lib/server/http";
 import { chatJsonRaw } from "@/lib/server/openai";
@@ -20,6 +20,9 @@ const TERMS_PER_DOC = 60;
 const DOC_REPLY_TOKENS = 1_800;
 const PARALLEL_DOCS = 5;
 const MAX_TERMS = 150;
+/** Page text kept for answering questions (with slide numbers). */
+const MAX_PAGE_CHARS = 2_000;
+const MAX_PAGES_TOTAL_CHARS = 400_000;
 
 const SYSTEM = `You build a glossary from lecture documents (slides, lecture notes, handouts), to help fix speech-to-text errors.
 List words and short phrases that a speech recognizer would likely get wrong:
@@ -75,6 +78,18 @@ function allocate(lengths: number[], budget: number): number[] {
     left -= caps[i];
   });
   return caps;
+}
+
+/** Per-page text for citing slide numbers. Lines repeated across many pages (headers/footers) are dropped. */
+function cleanPages(name: string, pages: string[]): SlidePage[] {
+  const rows = pages.map((p) => p.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean));
+  const freq = new Map<string, number>();
+  for (const ls of rows) for (const l of new Set(ls.map((x) => x.toLowerCase()))) freq.set(l, (freq.get(l) ?? 0) + 1);
+  const boilerplate = (l: string) =>
+    /^\d+$/.test(l) || (pages.length >= 4 && (freq.get(l.toLowerCase()) ?? 0) >= Math.max(3, pages.length * 0.4));
+  return rows
+    .map((ls, i) => ({ doc: name, page: i + 1, text: ls.filter((l) => !boilerplate(l)).join("\n").slice(0, MAX_PAGE_CHARS) }))
+    .filter((p) => p.text.replace(/\s+/g, "").length >= 20);
 }
 
 /** Runs `fn` over `items`, at most `limit` at a time, keeping result order. */
@@ -166,8 +181,18 @@ export async function POST(req: Request) {
     const readable = docs.filter((d) => d.readable);
     const skipped = docs.filter((d) => !d.readable).map((d) => d.name);
     const usable = readable.filter((d) => d.text.length > 0); // text left after de-dup
+    let budget = MAX_PAGES_TOTAL_CHARS;
+    const pages: SlidePage[] = [];
+    for (const d of extracted) {
+      if (!d.ok || !readable.some((r) => r.name === d.name)) continue;
+      for (const p of cleanPages(d.name, d.pages)) {
+        if (budget < p.text.length) break;
+        budget -= p.text.length;
+        pages.push(p);
+      }
+    }
     if (usable.length === 0) {
-      return NextResponse.json({ terms: [], documentsUsed: readable.length, skipped } satisfies SlidesResponse);
+      return NextResponse.json({ terms: [], documentsUsed: readable.length, skipped, pages } satisfies SlidesResponse);
     }
 
     const caps = allocate(
@@ -218,6 +243,7 @@ export async function POST(req: Request) {
       documentsUsed: readable.length,
       skipped,
       failed: failed.map((f) => f.name),
+      pages,
     } satisfies SlidesResponse);
   } catch (e) {
     return apiError(e);

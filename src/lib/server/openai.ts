@@ -119,3 +119,114 @@ export async function chatJson<T>(opts: Parameters<typeof chatJsonRaw>[0]): Prom
     throw new OpenAIError(502, "reply was not valid JSON", "bad_output");
   }
 }
+
+/** Small, cheap embedding model. 512 dimensions keep payloads and cached vectors small. */
+const EMBED_MODEL = "text-embedding-3-small";
+const EMBED_DIMENSIONS = 512;
+const EMBED_TIMEOUT_MS = 30_000;
+
+/** Unit-length embedding vectors (rounded to 4 decimals), one per input text, in order. */
+export async function embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
+  const res = await guarded(() =>
+    fetch(`${BASE}/embeddings`, {
+      method: "POST",
+      signal: withTimeout(signal, EMBED_TIMEOUT_MS),
+      headers: { Authorization: `Bearer ${getOpenAIKey()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: EMBED_MODEL, input: texts, dimensions: EMBED_DIMENSIONS }),
+    }),
+  );
+  const json = (await res.json()) as { data?: { index: number; embedding: number[] }[] };
+  const rows = [...(json.data ?? [])].sort((a, b) => a.index - b.index);
+  if (rows.length !== texts.length) throw new OpenAIError(502, "wrong number of embeddings", "bad_output");
+  return rows.map(({ embedding }) => {
+    const norm = Math.hypot(...embedding) || 1;
+    return embedding.map((x) => Math.round((x / norm) * 1e4) / 1e4);
+  });
+}
+
+const STREAM_TIMEOUT_MS = 60_000;
+const enc = new TextEncoder();
+const line = (o: unknown) => enc.encode(`${JSON.stringify(o)}\n`);
+
+/**
+ * Streams a chat completion as NDJSON events ({t:"delta"|"done"|"error"}). Request-level
+ * failures (bad key, rate limit, ...) throw BEFORE streaming starts, so the route can reply
+ * with a normal error. Failures after the first byte become an {t:"error"} event with a
+ * plain-language message; raw upstream text is never forwarded.
+ */
+export async function chatStream(opts: {
+  system: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+  maxTokens: number;
+  temperature?: number;
+  signal?: AbortSignal;
+}): Promise<ReadableStream<Uint8Array>> {
+  const signal = withTimeout(opts.signal, STREAM_TIMEOUT_MS);
+  const res = await guarded(() =>
+    fetch(`${BASE}/chat/completions`, {
+      method: "POST",
+      signal,
+      headers: { Authorization: `Bearer ${getOpenAIKey()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: TEXT_MODEL,
+        temperature: opts.temperature ?? 0.2,
+        max_tokens: opts.maxTokens,
+        stream: true,
+        messages: [{ role: "system", content: opts.system }, ...opts.messages],
+      }),
+    }),
+  );
+  if (!res.body) throw new OpenAIError(502, "no response body", "bad_output");
+  const upstream = res.body.getReader();
+  const dec = new TextDecoder();
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let buffer = "";
+      let finish = "";
+      try {
+        for (;;) {
+          const { done, value } = await upstream.read();
+          if (done) break;
+          buffer += dec.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buffer.indexOf("\n")) >= 0) {
+            const row = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            if (!row.startsWith("data:")) continue;
+            const data = row.slice(5).trim();
+            if (data === "[DONE]") continue;
+            try {
+              const choice = (JSON.parse(data) as { choices?: { delta?: { content?: string }; finish_reason?: string | null }[] })
+                .choices?.[0];
+              if (choice?.delta?.content) controller.enqueue(line({ t: "delta", v: choice.delta.content }));
+              if (choice?.finish_reason) finish = choice.finish_reason;
+            } catch {
+              /* ignore a malformed keep-alive row */
+            }
+          }
+        }
+        controller.enqueue(line({ t: "done", truncated: finish === "length" || undefined }));
+      } catch (e) {
+        if (opts.signal?.aborted) {
+          // The browser went away: nothing to tell anyone.
+        } else {
+          const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+          controller.enqueue(
+            line({
+              t: "error",
+              message: timedOut
+                ? "The answer took too long. Try again."
+                : "The connection was interrupted. Try again.",
+            }),
+          );
+        }
+      } finally {
+        controller.close();
+      }
+    },
+    cancel() {
+      void upstream.cancel().catch(() => {});
+    },
+  });
+}

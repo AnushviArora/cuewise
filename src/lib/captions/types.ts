@@ -60,6 +60,15 @@ export interface EditDecision {
 /** Where an edit stands: "auto" = fixed automatically, "pending" = awaiting review. */
 export type EditState = "auto" | "pending" | EditDecision["kind"];
 
+/** The readable text of one page of an uploaded document (slides, notes, handout). */
+export interface SlidePage {
+  /** File name, e.g. "lecture3.pdf". */
+  doc: string;
+  /** 1-based page (slide) number. */
+  page: number;
+  text: string;
+}
+
 export interface CaptionResult {
   cues: CaptionCue[];
   edits: CaptionEdit[];

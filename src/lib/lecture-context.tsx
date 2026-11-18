@@ -1,5 +1,7 @@
 "use client";
 
+import { clearChat } from "@/lib/ask/chat";
+import { clearLectureContext } from "@/lib/ask/lectureContext";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 export interface Lecture {
@@ -28,17 +30,26 @@ const LectureContext = createContext<LectureContextValue | null>(null);
 export function LectureProvider({ children }: { children: React.ReactNode }) {
   const [lecture, setLectureState] = useState<Lecture | null>(null);
   const urlRef = useRef<string | null>(null);
+  const idRef = useRef<string | null>(null);
 
   const release = () => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = null;
+    // The previous upload's chat and lecture data are never needed again.
+    if (idRef.current) {
+      clearChat(idRef.current);
+      clearLectureContext(idRef.current);
+      idRef.current = null;
+    }
   };
 
   const setLecture = useCallback<LectureContextValue["setLecture"]>((input) => {
     release();
     const videoUrl = URL.createObjectURL(input.video);
     urlRef.current = videoUrl;
-    setLectureState({ ...input, id: crypto.randomUUID(), courseName: input.courseName.trim(), videoUrl });
+    const id = crypto.randomUUID();
+    idRef.current = id;
+    setLectureState({ ...input, id, courseName: input.courseName.trim(), videoUrl });
   }, []);
 
   const clearLecture = useCallback(() => {

@@ -5,8 +5,9 @@ import { ApiRequestError, correctCues, extractSlideTerms, transcribeChunk } from
 import type { SlidesResponse } from "@/lib/ai/contracts";
 import { extractAudioChunks } from "@/lib/audio/extract";
 import { cacheGet, cacheSet, fingerprint } from "@/lib/cache";
+import { registerLectureContext } from "@/lib/ask/lectureContext";
 import { cleanEdits, withStableIds } from "@/lib/captions/corrections";
-import type { CaptionCue, CaptionEdit, CaptionResult, SlideTerm } from "@/lib/captions/types";
+import type { CaptionCue, CaptionEdit, CaptionResult, SlidePage, SlideTerm } from "@/lib/captions/types";
 import type { Lecture } from "@/lib/lecture-context";
 import { formatEta, secs } from "@/lib/time";
 
@@ -39,7 +40,11 @@ const TRANSCRIBE_PARALLEL = 3;
 const AUTO_RETRIES = 2;
 
 type RawEdits = Omit<CaptionEdit, "id">[];
-type Terms = Pick<SlidesResponse, "terms" | "documentsUsed" | "skipped"> & { failed: string[] };
+type Terms = Pick<SlidesResponse, "terms" | "documentsUsed" | "skipped"> & {
+  failed: string[];
+  /** Per-page text, so questions can cite slide numbers. */
+  pages: SlidePage[];
+};
 
 /** What has already succeeded for this lecture, kept so a retry redoes only what failed. */
 interface Done {
@@ -125,6 +130,7 @@ export function useCaptionPipeline(lecture: Lecture | null) {
         }
         if (!live()) return;
         const keys = mem.keys;
+        registerLectureContext(lectureId, { courseName: lecture.courseName, keys });
 
         // --- Documents: start now, in parallel with transcription -----------------------
         const hasDocs = lecture.slides.length > 0;
@@ -134,8 +140,10 @@ export function useCaptionPipeline(lecture: Lecture | null) {
           const t0 = performance.now();
           try {
             const hit = keys ? await cacheGet<Terms>(keys.terms) : undefined;
-            if (hit) {
+            // Entries saved before page text was kept have no `pages`: read the documents again.
+            if (hit?.pages) {
               mem.terms = hit;
+              registerLectureContext(lectureId, { pages: hit.pages });
               times.documents = 0;
               log("documents: reused saved terms");
               return;
@@ -149,7 +157,9 @@ export function useCaptionPipeline(lecture: Lecture | null) {
               documentsUsed: res.documentsUsed,
               skipped: res.skipped,
               failed: res.failed ?? [],
+              pages: res.pages ?? [],
             };
+            registerLectureContext(lectureId, { pages: mem.terms.pages });
             times.documents = performance.now() - t0;
             log(`documents: ${lecture.slides.length} files read in ${secs(times.documents)}s, ${res.terms.length} terms`);
             // Only remember complete results, so a partial answer isn't served again.

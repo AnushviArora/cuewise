@@ -4,7 +4,7 @@
  * ./client.ts from the matching tab. Types here are the seam between them.
  * This file must stay free of secrets and server-only imports.
  */
-import type { CaptionCue, CaptionEdit, SlideTerm } from "../captions/types";
+import type { CaptionCue, CaptionEdit, SlidePage, SlideTerm } from "../captions/types";
 
 export interface ApiError {
   error: string;
@@ -29,6 +29,8 @@ export interface SlidesResponse {
   skipped: string[];
   /** Documents that were readable but whose term check failed (others still count). */
   failed?: string[];
+  /** Readable text of each page, so questions can cite slide numbers. */
+  pages?: SlidePage[];
 }
 
 /** POST /api/correct — check a batch of cues against slide terms. */
@@ -59,14 +61,37 @@ export interface ReviewResponse {
   suggestions: ReviewSuggestion[];
 }
 
-/** POST /api/ask — student question → answer grounded in the lecture. */
+/** POST /api/embed — turn texts into vectors for finding the most relevant lecture passages. */
+export interface EmbedRequest {
+  texts: string[];
+}
+export interface EmbedResponse {
+  /** One unit-length vector per text, in order. */
+  vectors: number[][];
+}
+
+/** One lecture passage sent to the model as evidence. */
+export interface AskExcerpt {
+  /** "T4" (transcript) or "S2" (slide page): what the model cites. */
+  id: string;
+  /** Human-readable origin, e.g. "transcript 12:34" or "notes.pdf, page 7". */
+  label: string;
+  text: string;
+}
+
+/**
+ * POST /api/ask — question -> answer grounded ONLY in `excerpts`, streamed as NDJSON
+ * (one AskStreamEvent per line). The browser picks the excerpts, so only the relevant
+ * passages are sent, never the whole lecture.
+ */
 export interface AskRequest {
   courseName: string;
   question: string;
-  cues: CaptionCue[];
+  /** The last few turns, for follow-up questions. */
+  history: { role: "user" | "assistant"; content: string }[];
+  excerpts: AskExcerpt[];
 }
-export interface AskResponse {
-  answer: string;
-  /** Where in the video the answer comes from, so the UI can seek there. */
-  citations: { cueId: string; start: number }[];
-}
+export type AskStreamEvent =
+  | { t: "delta"; v: string }
+  | { t: "done"; truncated?: boolean }
+  | { t: "error"; message: string };

@@ -17,6 +17,8 @@ interface Props {
   review: ReviewModel;
   activeCueId: string | null;
   onSeek: (seconds: number) => void;
+  uploadId: string;
+  courseName: string;
   tab: string;
   onTabChange: (id: string) => void;
   reviewRequest: ReviewRequest | null;
@@ -33,6 +35,8 @@ export function SidePanel({
   review,
   activeCueId,
   onSeek,
+  uploadId,
+  courseName,
   tab,
   onTabChange,
   reviewRequest,
@@ -77,7 +81,7 @@ export function SidePanel({
               />
             ),
           },
-          { id: "ask", label: "Ask this lecture", content: <AskTab /> },
+          { id: "ask", label: "Ask this lecture", content: <AskTab uploadId={uploadId} courseName={courseName} ready={pipeline.status === "done"} onSeek={onSeek} /> },
         ]}
       />
     </GlassPanel>

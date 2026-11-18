@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassPanel } from "@/components/ui/GlassPanel";
 import { ArrowRightIcon, FileIcon, TranscriptIcon, UploadIcon, VideoIcon } from "@/components/ui/Icons";
+import { abortChat } from "@/lib/ask/chat";
+import { registerLectureContext } from "@/lib/ask/lectureContext";
 import { downloadTranscript, type ExportKind } from "@/lib/captions/export";
 import {
   DEFAULT_CAPTION_SETTINGS,
@@ -68,6 +70,15 @@ function LectureWorkspace({ lecture }: { lecture: Lecture }) {
   const [reviewRequest, setReviewRequest] = useState<ReviewRequest | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const toolsRef = useRef<HTMLElement>(null);
+
+  // "Ask this lecture" reads the reviewed captions (corrections included) through
+  // getLectureContext; keep it current, and stop any answer in progress when leaving.
+  useEffect(() => {
+    if (state.status === "done") {
+      registerLectureContext(lecture.id, { courseName: lecture.courseName, cues: review.cues });
+    }
+  }, [state.status, review.cues, lecture.id, lecture.courseName]);
+  useEffect(() => () => abortChat(lecture.id), [lecture.id]);
 
   const openReview = useCallback((editId?: string) => {
     setTab("review");
@@ -184,6 +195,8 @@ function LectureWorkspace({ lecture }: { lecture: Lecture }) {
             review={review}
             activeCueId={activeCueId}
             onSeek={(t) => playerRef.current?.seek(t)}
+            uploadId={lecture.id}
+            courseName={lecture.courseName}
             tab={tab}
             onTabChange={setTab}
             reviewRequest={reviewRequest}
