@@ -2,7 +2,7 @@
 
 Accurate lecture captions that know your course's own terms, plus a chat that answers questions from the lecture and links to the exact moment.
 
-> 🎬 **Demo video:** _coming soon_ — placeholder, add the link here.
+> 🎬 **Demo video:** _coming soon_ 
 
 ## The problem
 
