@@ -2,7 +2,10 @@
 
 Accurate lecture captions that know your course's own terms, plus a chat that answers questions from the lecture and links to the exact moment.
 
-> 🎬 **Demo video:** _coming soon_ 
+> 🎬 **Demo video:**
+>
+> <img width="2834" height="1404" alt="B6F3B6F9-D2C5-4AD2-9DE6-6C381A5443B8_1_206_a" src="https://github.com/user-attachments/assets/36c45f52-e78b-464a-9a42-584bb04e6eb4" />
+
 
 ## The problem
 
