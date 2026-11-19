@@ -5,8 +5,7 @@ Accurate lecture captions that know your course's own terms, plus a chat that an
 **🎬 Demo**
 
 
-
-
+https://github.com/user-attachments/assets/5c13199a-e19a-4d7b-9154-5df24bca6f92
 
 
 
