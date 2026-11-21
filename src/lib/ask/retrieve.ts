@@ -5,8 +5,10 @@ export interface Retrieval {
   hits: Chunk[];
   /** The same chunks, best match first (used to pick sources when an answer forgets to cite). */
   ranked: Chunk[];
-  /** False when nothing in the lecture is close enough: don't ask the model at all. */
+  /** False when nothing in the lecture or materials is close enough to answer from. */
   covered: boolean;
+  /** Not covered only: the closest passages, too weak to answer from but maybe worth linking to. */
+  nearest: Chunk[];
   method: "semantic" | "keyword";
   /** Best match score (cosine similarity, or 0..1 keyword score). */
   best: number;
@@ -18,6 +20,10 @@ const SLIDE_HITS = 5;
 /** Below this the lecture is treated as not covering the question. Tuned on real embeddings. */
 export const COVER_MIN_SEMANTIC = 0.3;
 export const COVER_MIN_KEYWORD = 0.34;
+/** When nothing answers the question, up to this many near-misses are kept for "connect it back" links. */
+const NEAREST_HITS = 3;
+const NEAR_MIN_SEMANTIC = 0.18;
+const NEAR_MIN_KEYWORD = 0.12;
 const UNSEEN_WORD_WEIGHT = 0.4;
 /** Keep chunks within this distance of the best match, so weak stragglers aren't sent. */
 const KEEP_MARGIN_SEMANTIC = 0.14;
@@ -113,7 +119,7 @@ export function retrieve(
 ): Retrieval {
   if (chunks.length > 0 && isOverviewQuestion(question)) {
     const hits = overviewHits(chunks);
-    return { hits, ranked: hits, covered: true, method: "keyword", best: 1 };
+    return { hits, ranked: hits, covered: true, nearest: [], method: "keyword", best: 1 };
   }
   const semantic = !!vectors && !!queryVector && vectors.length === chunks.length;
   const scores = semantic
@@ -122,7 +128,15 @@ export function retrieve(
   const best = Math.max(0, ...scores);
   const method = semantic ? "semantic" : "keyword";
   const covered = best >= (semantic ? COVER_MIN_SEMANTIC : COVER_MIN_KEYWORD);
-  if (!covered) return { hits: [], ranked: [], covered: false, method, best };
+  if (!covered) {
+    const minNear = semantic ? NEAR_MIN_SEMANTIC : NEAR_MIN_KEYWORD;
+    const nearest: Chunk[] = [];
+    for (const { c, s } of chunks.map((c, i) => ({ c, s: scores[i] })).sort((a, b) => b.s - a.s)) {
+      if (nearest.length >= NEAREST_HITS || s < minNear) break;
+      if (!overlapsChosen(c, nearest)) nearest.push(c);
+    }
+    return { hits: [], ranked: [], covered: false, nearest, method, best };
+  }
 
   const floor = best - (semantic ? KEEP_MARGIN_SEMANTIC : KEEP_MARGIN_KEYWORD);
   const ranked = chunks.map((c, i) => ({ c, s: scores[i] })).sort((a, b) => b.s - a.s);
@@ -141,5 +155,5 @@ export function retrieve(
   );
   const hits = [...transcript, ...slides];
   const chosen = new Set(hits.map((h) => h.id));
-  return { hits, ranked: ranked.map((r) => r.c).filter((c) => chosen.has(c.id)), covered: true, method, best };
+  return { hits, ranked: ranked.map((r) => r.c).filter((c) => chosen.has(c.id)), covered: true, nearest: [], method, best };
 }

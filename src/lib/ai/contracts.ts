@@ -72,17 +72,31 @@ export interface EmbedResponse {
 
 /** One lecture passage sent to the model as evidence. */
 export interface AskExcerpt {
-  /** "T4" (transcript) or "S2" (slide page): what the model cites. */
+  /** "T4" (transcript) or "S2" (course file page): what the model cites. */
   id: string;
   /** Human-readable origin, e.g. "transcript 12:34" or "notes.pdf, page 7". */
   label: string;
   text: string;
+  /** True for a near-miss: too weak to answer from, only usable to link back to the course. */
+  related?: boolean;
+}
+
+export type AskSource = "lecture" | "materials" | "general";
+
+/** One labeled piece of an answer. `citations` are excerpt ids that were sent. */
+export interface AskPart {
+  source: AskSource;
+  text: string;
+  citations: string[];
+}
+export interface AskResponse {
+  parts: AskPart[];
 }
 
 /**
- * POST /api/ask — question -> answer grounded ONLY in `excerpts`, streamed as NDJSON
- * (one AskStreamEvent per line). The browser picks the excerpts, so only the relevant
- * passages are sent, never the whole lecture.
+ * POST /api/ask — question -> answer split into labeled parts (lecture / materials / general).
+ * The browser picks the excerpts, so only the relevant passages are sent. `excerpts` may be
+ * empty: then the answer is general knowledge.
  */
 export interface AskRequest {
   courseName: string;
@@ -91,7 +105,3 @@ export interface AskRequest {
   history: { role: "user" | "assistant"; content: string }[];
   excerpts: AskExcerpt[];
 }
-export type AskStreamEvent =
-  | { t: "delta"; v: string }
-  | { t: "done"; truncated?: boolean }
-  | { t: "error"; message: string };

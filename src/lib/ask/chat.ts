@@ -1,6 +1,6 @@
-import { ApiRequestError, embedTexts, streamAnswer } from "@/lib/ai/client";
-import type { AskRequest } from "@/lib/ai/contracts";
-import { citedIds, closestSources, isNotCovered, NOT_COVERED } from "./citations";
+import { ApiRequestError, askLecture, embedTexts } from "@/lib/ai/client";
+import type { AskRequest, AskSource } from "@/lib/ai/contracts";
+import { checkParts } from "./citations";
 import { getLectureContext } from "./lectureContext";
 import { retrieve } from "./retrieve";
 
@@ -12,7 +12,18 @@ export interface SourceRef {
   label: string;
   /** Full origin, e.g. "notes.pdf, page 7". */
   title: string;
+  /** Start of the passage in seconds (transcript only). */
   start?: number;
+  /** Opening words of the passage, taken from the real text. */
+  snippet: string;
+}
+
+/** One labeled piece of an answer. */
+export interface ChatPart {
+  source: AskSource;
+  text: string;
+  /** Ids of passages this part relied on (all of them are in `refs`). */
+  citations: string[];
 }
 
 export interface ChatMessage {
@@ -26,11 +37,8 @@ export interface ChatMessage {
   question?: string;
   /** Ids that were sent to the model (the only citations that count) and what each one is. */
   refs?: Record<string, SourceRef>;
-  sources?: SourceRef[];
-  /** The sources are the closest passages, not ones the model cited. */
-  related?: boolean;
-  notCovered?: boolean;
-  truncated?: boolean;
+  /** The finished answer, split by source. `text` holds the same words as plain text. */
+  parts?: ChatPart[];
   error?: string;
 }
 
@@ -92,59 +100,39 @@ async function execute(
     }
     const found = retrieve(query, ctx.chunks, qv ? ctx.vectors : null, qv);
 
-    if (!found.covered) {
-      update({ status: "done", text: NOT_COVERED, notCovered: true, phase: undefined, sources: [] });
-      return;
-    }
-
-    const excerpts = found.hits.map((c) => ({ id: c.id, label: c.label, text: c.text }));
-    const sentIds = excerpts.map((e) => e.id);
+    // Real matches are sent as evidence. When there are none, the nearest passages are sent
+    // only as "loosely related" so a general answer can link back to the course.
+    const answering = found.hits;
+    const near = found.covered ? [] : found.nearest;
+    const sent = [...answering, ...near];
     const req: AskRequest = {
       courseName,
       question,
       history: priorDone.slice(-HISTORY_TURNS * 2).map((m) => ({ role: m.role, content: m.text })),
-      excerpts,
+      excerpts: sent.map((c) => ({ id: c.id, label: c.label, text: c.text, related: near.includes(c) || undefined })),
     };
-    const byId = new Map(found.hits.map((c) => [c.id, c]));
-    // With several documents, "Slide 1" is ambiguous, so say which file it is from.
-    const multiDoc = new Set(ctx.chunks.filter((c) => c.kind === "slide").map((c) => c.doc)).size > 1;
-    const shortName = (n: string) => (n.length > 22 ? `${n.slice(0, 19)}…` : n);
-    const toRef = (id: string): SourceRef => {
-      const c = byId.get(id)!;
-      return c.kind === "transcript"
-        ? { id, kind: "transcript", label: c.label.replace("transcript ", ""), title: c.label, start: c.start }
+    const shortName = (n: string) => (n.length > 28 ? `${n.slice(0, 25)}…` : n);
+    const snip = (t: string) => (t.length > 140 ? `${t.slice(0, 137).trimEnd()}…` : t);
+    const toRef = (c: (typeof sent)[number]): SourceRef =>
+      c.kind === "transcript"
+        ? { id: c.id, kind: "transcript", label: c.label.replace("transcript ", ""), title: c.label, start: c.start, snippet: snip(c.text) }
         : {
-            id,
+            id: c.id,
             kind: "slide",
-            // PowerPoint, Word, text and code carry their own locator ("Slide 7", "lines 12-30") and
-            // always name the file; PDFs keep their page number and only name the file when ambiguous.
-            label: c.locator
-              ? `${c.locator} · ${shortName(c.doc ?? "")}`
-              : `Slide ${c.page}${multiDoc ? ` · ${shortName(c.doc ?? "")}` : ""}`,
+            // Always name the file, plus its slide / section / lines / page.
+            label: `${shortName(c.doc ?? "")} · ${c.locator ?? `page ${c.page}`}`,
             title: c.label,
+            snippet: snip(c.text),
           };
-    };
-    update({ phase: "Writing the answer…", refs: Object.fromEntries(sentIds.map((id) => [id, toRef(id)])) });
-    let text = "";
-    const { truncated } = await streamAnswer(
-      req,
-      (d) => {
-        text += d;
-        update({ status: "streaming", text, phase: undefined });
-      },
-      signal,
+    update({ phase: "Writing the answer…", refs: Object.fromEntries(sent.map((c) => [c.id, toRef(c)])) });
+    const res = await askLecture(req, signal);
+    const parts = checkParts(
+      Array.isArray(res?.parts) ? res.parts : [],
+      new Set(sent.map((c) => c.id)),
+      new Set(answering.map((c) => c.id)),
     );
-
-    const valid = new Set(sentIds);
-    if (isNotCovered(text) && text.trim().length < NOT_COVERED.length + 5) {
-      update({ status: "done", text: NOT_COVERED, notCovered: true, sources: [], truncated: false });
-      return;
-    }
-    const cited = citedIds(text, valid);
-    // The model is told to cite; if it didn't, show the closest passages and say so honestly.
-    const related = cited.length === 0;
-    const ids = related ? closestSources(text, found.hits, found.ranked).map((c) => c.id) : cited;
-    update({ status: "done", sources: ids.map(toRef), related, truncated, notCovered: isNotCovered(text) });
+    if (parts.length === 0) throw new ApiRequestError("I couldn’t write an answer. Please try again.", 0);
+    update({ status: "done", phase: undefined, text: parts.map((p) => p.text).join("\n\n"), parts });
   } catch (e) {
     const stopped = signal.aborted;
     update({

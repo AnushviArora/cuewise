@@ -1,16 +1,8 @@
-import type { Chunk } from "./chunks";
-
-export const NOT_COVERED = "This lecture doesn't seem to cover that.";
+import type { AskPart, AskSource } from "@/lib/ai/contracts";
 
 export type Segment = { kind: "text"; text: string } | { kind: "cite"; ids: string[] };
 
 const CITE = /\[([TS]\d+(?:\s*[,;]\s*[TS]\d+)*)\]/g;
-
-/** True when the model declined because the lecture doesn't cover the question. */
-export function isNotCovered(text: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ").trim();
-  return norm(text).startsWith(norm(NOT_COVERED).slice(0, -1));
-}
 
 /**
  * Splits an answer into plain text and citations. Only ids in `valid` (the excerpts that
@@ -48,18 +40,34 @@ export function citedIds(text: string, valid: Set<string>): string[] {
   return ids;
 }
 
+/** An answer part after checking it against what retrieval actually found. */
+export interface CheckedPart {
+  source: AskSource;
+  text: string;
+  /** Valid excerpt ids only: cited inline or listed by the model. */
+  citations: string[];
+}
+
 /**
- * Sources to show when an answer forgot its [T4]/[S2] markers. If the answer names a document
- * that was sent ("solver.py", "lines 5-8"), those passages are the likely sources; otherwise the
- * best-matching passages are. Callers label these honestly as "related", not "cited".
+ * Retrieval, not the model, has the last word on a part's label. "lecture" needs a cited
+ * transcript passage that was found as an answer; "materials" needs a cited file passage.
+ * Anything else becomes "general". Ids that were never sent are dropped.
+ * @param sent every id sent to the model; @param answering the ids that were real matches
  */
-export function closestSources(answer: string, hits: Chunk[], ranked: Chunk[], limit = 3): Chunk[] {
-  const text = answer.toLowerCase();
-  const named = hits.filter((c) => c.kind === "slide" && c.doc && text.includes(c.doc.toLowerCase()));
-  if (named.length > 0) {
-    const exact = (c: Chunk) => (c.locator && text.includes(c.locator.toLowerCase()) ? 0 : 1);
-    const rank = (c: Chunk) => ranked.findIndex((r) => r.id === c.id);
-    return [...named].sort((a, b) => exact(a) - exact(b) || rank(a) - rank(b)).slice(0, limit);
+export function checkParts(parts: AskPart[], sent: Set<string>, answering: Set<string>): CheckedPart[] {
+  const out: CheckedPart[] = [];
+  for (const p of parts) {
+    const text = typeof p?.text === "string" ? p.text.trim() : "";
+    if (!text) continue;
+    const listed = Array.isArray(p.citations) ? p.citations.map(String) : [];
+    const citations = [...new Set([...citedIds(text, sent), ...listed.filter((id) => sent.has(id))])];
+    const real = citations.filter((id) => answering.has(id));
+    let source: AskSource = "general";
+    if (p.source === "lecture" || p.source === "materials") {
+      if (real.some((id) => id.startsWith("T"))) source = "lecture";
+      else if (real.some((id) => id.startsWith("S"))) source = "materials";
+    }
+    out.push({ source, text, citations });
   }
-  return ranked.slice(0, limit);
+  return out;
 }

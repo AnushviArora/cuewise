@@ -5,21 +5,31 @@ import { AlertIcon, ArrowRightIcon, ReplayIcon, SparkIcon } from "@/components/u
 import { clearChat, retryQuestion, sendQuestion, type ChatMessage } from "@/lib/ask/chat";
 import { parseAnswer } from "@/lib/ask/citations";
 import { prepareLecture } from "@/lib/ask/lectureContext";
-import { AnswerText, SourceChip } from "./AnswerText";
+import { AnswerText, SourceBadge } from "./AnswerText";
 import { useAskChat } from "./useAskChat";
 
 const MAX_QUESTION = 500;
 
-/** Plain text of an answer (no citation markers) plus its sources, for the screen reader. */
+const SPOKEN: Record<string, string> = {
+  lecture: "From the lecture",
+  materials: "From your course materials",
+  general: "Not from this lecture",
+};
+
+/** Plain text of an answer (no citation markers), part by part with its source, for the screen reader. */
 function spoken(m: ChatMessage): string {
   const valid = new Set(Object.keys(m.refs ?? {}));
-  const text = parseAnswer(m.text, valid, false)
-    .map((s) => (s.kind === "text" ? s.text : ""))
-    .join("")
-    .replace(/\s+/g, " ")
-    .trim();
-  const src = (m.sources ?? []).map((s) => s.label).join(", ");
-  return `Answer: ${text}${src && !m.notCovered ? ` ${m.related ? "Related" : "Sources"}: ${src}.` : ""}`;
+  const clean = (t: string) =>
+    parseAnswer(t, valid, false)
+      .map((s) => (s.kind === "text" ? s.text : ""))
+      .join("")
+      .replace(/\s+/g, " ")
+      .trim();
+  const parts = (m.parts ?? []).map((p) => {
+    const src = p.citations.map((id) => m.refs?.[id]?.label).filter(Boolean).join(", ");
+    return `${SPOKEN[p.source]}: ${clean(p.text)}${src ? ` Sources: ${src}.` : ""}`;
+  });
+  return `Answer. ${parts.join(" ")}`;
 }
 
 /** Nearest ancestor that scrolls, so the chat can follow new text without moving the page. */
@@ -103,7 +113,7 @@ export function AskPanel({ uploadId, courseName, onSeek }: Props) {
 
       <div className="mb-3 flex items-start justify-between gap-3">
         <p className="text-xs leading-relaxed text-muted">
-          Answers come only from this lecture’s transcript and slides, with links to the moment.
+          Answers say where they come from: the lecture, your course materials, or general knowledge.
         </p>
         {messages.length > 0 && (
           <button
@@ -128,7 +138,7 @@ export function AskPanel({ uploadId, courseName, onSeek }: Props) {
             </span>
             <h2 className="mt-3 text-base font-semibold">Ask this lecture</h2>
             <p className="mt-1.5 max-w-xs text-sm leading-relaxed text-muted">
-              Ask about anything the lecture covers. If it isn’t covered, you’ll be told instead of getting a guess.
+              Ask anything. You’ll get an answer from the lecture or your course files when they cover it, and a clearly labeled general answer when they don’t.
             </p>
           </li>
         )}
@@ -182,26 +192,17 @@ export function AskPanel({ uploadId, courseName, onSeek }: Props) {
                   </div>
                 )}
 
-                {(m.status === "streaming" || m.status === "done") &&
-                  (m.notCovered && m.sources?.length === 0 ? (
-                    <div>
-                      <p className="text-sm font-medium leading-relaxed">{m.text}</p>
-                      <p className="mt-1 text-xs text-muted">Try rephrasing, or check the transcript.</p>
-                    </div>
-                  ) : (
-                    <AnswerText message={m} onSeek={onSeek} />
-                  ))}
-
-                {m.status === "done" && !m.notCovered && (m.sources?.length ?? 0) > 0 && (
-                  <p className="mt-2 flex flex-wrap items-center gap-y-1 border-t border-white/10 pt-2 text-xs text-muted">
-                    <span className="mr-1">{m.related ? "Related parts of the lecture:" : "Sources:"}</span>
-                    {m.sources!.map((s) => (
-                      <SourceChip key={s.id} source={s} onSeek={onSeek} srPrefix={false} />
+                {m.status === "done" && (
+                  <div className="space-y-3">
+                    {(m.parts ?? []).map((p, i) => (
+                      <div key={i}>
+                        <div className="mb-1">
+                          <SourceBadge source={p.source} />
+                        </div>
+                        <AnswerText part={p} refs={m.refs ?? {}} onSeek={onSeek} />
+                      </div>
                     ))}
-                  </p>
-                )}
-                {m.status === "done" && m.truncated && (
-                  <p className="mt-1 text-xs text-subtle">Answer shortened to keep it brief.</p>
+                  </div>
                 )}
               </article>
             </li>
