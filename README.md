@@ -105,6 +105,6 @@ Other scripts: `npm run typecheck`, `npm run build`, `npm start`.
 
 ## Credits
 
-Demo lecture content from MIT OpenCourseWare 6.0001 (Fall 2016), licensed CC BY-NC-SA 4.0.
+Demo lecture content from [MIT OpenCourseWare 6.0001 (Fall 2016)](https://ocw.mit.edu/courses/6-0001-introduction-to-computer-science-and-programming-in-python-fall-2016/), licensed [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
 No lecture content is included in this repository.
