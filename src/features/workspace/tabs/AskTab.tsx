@@ -10,10 +10,11 @@ interface Props {
   /** Captions (the transcript) are ready, so questions can be answered. */
   ready: boolean;
   onSeek: (seconds: number) => void;
+  onShare: (seconds: number, question?: string) => void;
 }
 
 /** "Ask this lecture": grounded Q&A over this upload's transcript and slide text. */
-export function AskTab({ uploadId, courseName, ready, onSeek }: Props) {
+export function AskTab({ uploadId, courseName, ready, onSeek, onShare }: Props) {
   if (!ready) {
     return (
       <Placeholder icon={<SparkIcon />} title="Questions open when captions are ready">
@@ -22,5 +23,5 @@ export function AskTab({ uploadId, courseName, ready, onSeek }: Props) {
       </Placeholder>
     );
   }
-  return <AskPanel uploadId={uploadId} courseName={courseName} onSeek={onSeek} />;
+  return <AskPanel uploadId={uploadId} courseName={courseName} onSeek={onSeek} onShare={onShare} />;
 }

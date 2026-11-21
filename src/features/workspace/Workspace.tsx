@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassPanel } from "@/components/ui/GlassPanel";
-import { ArrowRightIcon, FileIcon, TranscriptIcon, UploadIcon, VideoIcon } from "@/components/ui/Icons";
+import { ArrowRightIcon, CloseIcon, FileIcon, ShareIcon, TranscriptIcon, UploadIcon, VideoIcon } from "@/components/ui/Icons";
 import { abortChat } from "@/lib/ask/chat";
 import { registerLectureContext } from "@/lib/ask/lectureContext";
 import { downloadTranscript, type ExportKind } from "@/lib/captions/export";
@@ -14,7 +14,9 @@ import {
   saveSettings,
 } from "@/lib/captions/settings";
 import type { CaptionSettings } from "@/lib/captions/types";
+import { clock } from "@/lib/captions/export";
 import { useLecture, type Lecture } from "@/lib/lecture-context";
+import { ShareToast, useShare } from "../share/useShare";
 import { ProcessingCard } from "../captions/ProcessingCard";
 import { useCaptionPipeline } from "../captions/useCaptionPipeline";
 import { CheckStatus } from "../captions/CheckStatus";
@@ -29,24 +31,75 @@ import { VideoPlayer, type PlayerHandle } from "./VideoPlayer";
  * Keyed by lecture id: a new upload remounts everything below, so captions, review
  * decisions, transcript, tabs and player state can never carry over from a previous lecture.
  */
-export function Workspace() {
-  const { lecture } = useLecture();
-  if (!lecture) return <EmptyWorkspace />;
-  return <LectureWorkspace key={lecture.id} lecture={lecture} />;
+interface SharedLink {
+  lectureId?: string;
+  /** Seconds from ?t= (0 when missing or bad). */
+  startAt?: number;
+  /** Question and course title carried in the link, already cleaned. Shown as plain text only. */
+  question?: string | null;
+  title?: string | null;
 }
 
-function EmptyWorkspace() {
+export function Workspace({ lectureId, startAt = 0, question = null, title = null }: SharedLink = {}) {
+  const { lecture } = useLecture();
+  const link = { startAt, question, title };
+  if (!lecture) return <EmptyWorkspace shared={!!lectureId} link={link} />;
+  // A shared link for a different lecture than the one loaded here.
+  if (lectureId && lecture.id !== lectureId) return <EmptyWorkspace shared link={link} />;
+  return <LectureWorkspace key={lecture.session} lecture={lecture} startAt={startAt} question={question} />;
+}
+
+/** The question a link carries, with its moment. Text only: never rendered as HTML. */
+function SharedQuestion({ at, question, onClose }: { at: number; question: string; onClose?: () => void }) {
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm">
+      <p className="min-w-0 flex-1 leading-relaxed">
+        <span className="text-muted">Shared question at {clock(at)}: </span>
+        <span className="break-words">{question}</span>
+      </p>
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Dismiss shared question"
+          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted hover:bg-white/10 hover:text-ink"
+        >
+          <CloseIcon width={14} height={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyWorkspace({
+  shared = false,
+  link,
+}: {
+  shared?: boolean;
+  link?: { startAt: number; question: string | null; title: string | null };
+}) {
   return (
     <main id="main" className="mx-auto flex min-h-dvh max-w-lg items-center px-5">
       <GlassPanel className="w-full p-8 text-center">
         <span className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent">
           <UploadIcon />
         </span>
-        <h1 className="mt-4 text-xl font-semibold">No lecture loaded</h1>
+        <h1 className="mt-4 text-xl font-semibold">{shared ? "This lecture isn’t available here" : "No lecture loaded"}</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          Lectures live in your browser, so reloading the page clears them. Upload a lecture
-          to get started.
+          {shared
+            ? "Lectures live in the browser they were uploaded in, so this link only opens where that lecture is loaded. Upload the same video here, then open the link again."
+            : "Lectures live in your browser, so reloading the page clears them. Upload a lecture to get started."}
         </p>
+        {shared && link && (link.question || link.title) && (
+          <div className="mt-5 space-y-2 text-left">
+            {link.title && <p className="text-center text-xs text-subtle">Lecture: {link.title}</p>}
+            {link.question ? (
+              <SharedQuestion at={link.startAt} question={link.question} />
+            ) : (
+              <p className="text-center text-xs text-muted">Shared moment: {clock(link.startAt)}</p>
+            )}
+          </div>
+        )}
         <Link
           href="/"
           className="mt-6 inline-flex items-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-accent-on shadow-glow transition hover:brightness-110"
@@ -58,7 +111,7 @@ function EmptyWorkspace() {
   );
 }
 
-function LectureWorkspace({ lecture }: { lecture: Lecture }) {
+function LectureWorkspace({ lecture, startAt, question }: { lecture: Lecture; startAt: number; question: string | null }) {
   const [settings, setSettings] = useState<CaptionSettings>(DEFAULT_CAPTION_SETTINGS);
   const hydrated = useRef(false);
   const playerRef = useRef<PlayerHandle>(null);
@@ -70,6 +123,9 @@ function LectureWorkspace({ lecture }: { lecture: Lecture }) {
   const [reviewRequest, setReviewRequest] = useState<ReviewRequest | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const toolsRef = useRef<HTMLElement>(null);
+  const { share, note } = useShare(lecture.id, lecture.courseName, review.cues);
+  const captionsReady = state.status === "done";
+  const [questionShown, setQuestionShown] = useState(true);
 
   // "Ask this lecture" reads the reviewed captions (corrections included) through
   // getLectureContext; keep it current, and stop any answer in progress when leaving.
@@ -177,7 +233,29 @@ function LectureWorkspace({ lecture }: { lecture: Lecture }) {
             settings={settings}
             onSettingsChange={setSettings}
             onActiveCueChange={setActiveCueId}
+            startAt={startAt}
           />
+          {question && questionShown && (
+            <div className="mt-3">
+              <SharedQuestion at={startAt} question={question} onClose={() => setQuestionShown(false)} />
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              disabled={!captionsReady}
+              aria-describedby={captionsReady ? undefined : "share-hint"}
+              onClick={() => void share(playerRef.current?.getTime() ?? 0)}
+              className="inline-flex items-center gap-2 rounded-xl border border-edge bg-white/[0.04] px-3.5 py-2 text-sm text-ink transition-colors hover:border-ink/60 hover:bg-white/[0.09] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-edge disabled:hover:bg-white/[0.04]"
+            >
+              <ShareIcon width={16} height={16} /> Share this moment
+            </button>
+            {!captionsReady && (
+              <span id="share-hint" className="text-xs text-subtle">
+                Available once captions are ready.
+              </span>
+            )}
+          </div>
         </motion.section>
 
         <motion.section
@@ -195,6 +273,7 @@ function LectureWorkspace({ lecture }: { lecture: Lecture }) {
             review={review}
             activeCueId={activeCueId}
             onSeek={(t) => playerRef.current?.seek(t)}
+            onShare={(t, q) => void share(t, q)}
             uploadId={lecture.id}
             courseName={lecture.courseName}
             tab={tab}
@@ -216,6 +295,7 @@ function LectureWorkspace({ lecture }: { lecture: Lecture }) {
         onDownload={download}
         onOpenReview={openReview}
       />
+      <ShareToast note={note} />
     </main>
   );
 }

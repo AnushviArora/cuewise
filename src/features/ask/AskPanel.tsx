@@ -45,9 +45,10 @@ interface Props {
   uploadId: string;
   courseName: string;
   onSeek: (seconds: number) => void;
+  onShare: (seconds: number, question?: string) => void;
 }
 
-export function AskPanel({ uploadId, courseName, onSeek }: Props) {
+export function AskPanel({ uploadId, courseName, onSeek, onShare }: Props) {
   const { messages, asking } = useAskChat(uploadId);
   const [draft, setDraft] = useState("");
   const [announce, setAnnounce] = useState("");
@@ -199,7 +200,7 @@ export function AskPanel({ uploadId, courseName, onSeek }: Props) {
                         <div className="mb-1">
                           <SourceBadge source={p.source} />
                         </div>
-                        <AnswerText part={p} refs={m.refs ?? {}} onSeek={onSeek} />
+                        <AnswerText part={p} refs={m.refs ?? {}} onSeek={onSeek} onShare={onShare} question={m.question} />
                       </div>
                     ))}
                   </div>

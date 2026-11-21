@@ -30,8 +30,9 @@ export function UploadForm() {
   const [slides, setSlides] = useState<File[]>([]);
   const [slideMessages, setSlideMessages] = useState<string[]>([]);
   const [errors, setErrors] = useState<Errors>(NO_ERRORS);
+  const submitting = useRef(false);
 
-  const onSubmit = (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     const next: Errors = {
       course: validateCourseName(course),
@@ -44,8 +45,14 @@ export function UploadForm() {
       else document.getElementById("video-field")?.querySelector("input")?.focus();
       return;
     }
-    setLecture({ courseName: course, video: video as File, slides });
-    router.push("/workspace");
+    if (submitting.current) return;
+    submitting.current = true;
+    try {
+      const id = await setLecture({ courseName: course, video: video as File, slides });
+      router.push(`/lecture/${id}`);
+    } finally {
+      submitting.current = false;
+    }
   };
 
   return (

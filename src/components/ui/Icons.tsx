@@ -57,6 +57,9 @@ export const ArrowRightIcon = (p: P) => (
 export const CheckIcon = (p: P) => (
   <svg {...base(p)}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
 );
+export const ShareIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="m8.2 10.8 7.6-3.6m-7.6 6 7.6 3.6" /></svg>
+);
 export const DownloadIcon = (p: P) => (
   <svg {...base(p)}><path d="M12 4v11m0 0-5-5m5 5 5-5" /><path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" /></svg>
 );

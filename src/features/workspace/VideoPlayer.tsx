@@ -30,6 +30,8 @@ function fmt(t: number): string {
 
 export interface PlayerHandle {
   seek: (seconds: number) => void;
+  /** Where the playhead is now, in seconds. */
+  getTime: () => number;
   /** Jump to `start`, play, and pause automatically at `end` (at the current speed). */
   playClip: (start: number, end: number) => void;
 }
@@ -44,6 +46,8 @@ interface Props {
   onSettingsChange: (next: CaptionSettings) => void;
   /** Called whenever the cue under the playhead changes (null = silence). */
   onActiveCueChange?: (id: string | null) => void;
+  /** Start here once the video loads (from a shared link). Ignored if past the end. */
+  startAt?: number;
   ref?: Ref<PlayerHandle>;
 }
 
@@ -57,7 +61,7 @@ const SIDE_PANEL_MIN_WIDTH = 520;
 const SIDE_CLASS = { left: "left-3", right: "right-3" } as const;
 const EDGE_CLASS = { top: "top-3", bottom: "bottom-3" } as const;
 
-export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onActiveCueChange, ref }: Props) {
+export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onActiveCueChange, startAt, ref }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -77,8 +81,10 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
   const [activeId, setActiveId] = useState<string | null>(null);
   const [rate, setRate] = useState(1);
   const clipEnd = useRef<number | null>(null);
+  const startApplied = useRef(false);
 
   useImperativeHandle(ref, () => ({
+    getTime: () => videoRef.current?.currentTime ?? 0,
     seek: (t) => {
       const v = videoRef.current;
       if (!v) return;
@@ -97,6 +103,15 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
       });
     },
   }));
+
+  // Same page, new ?t= (e.g. another shared moment opened in this tab): jump there too.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (startAt && v && v.readyState >= 1 && startAt < v.duration && v.currentTime !== startAt) {
+      v.currentTime = startAt;
+      setTime(startAt);
+    }
+  }, [startAt]);
 
   // Keep the active cue in sync with the playhead. timeupdate only fires ~4x/second,
   // so while playing we also poll every frame (cheap: state only changes at cue edges).
@@ -264,8 +279,15 @@ export function VideoPlayer({ src, title, cues, settings, onSettingsChange, onAc
           }}
           onSeeked={syncCue}
           onLoadedMetadata={(e) => {
-            setDuration(e.currentTarget.duration);
-            e.currentTarget.playbackRate = rate;
+            const v = e.currentTarget;
+            setDuration(v.duration);
+            v.playbackRate = rate;
+            // Shared link: jump to the moment (not past the end), but don't autoplay.
+            if (startAt && Number.isFinite(v.duration) && startAt < v.duration && !startApplied.current) {
+              v.currentTime = startAt;
+              setTime(startAt);
+            }
+            startApplied.current = true;
           }}
           onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
           onError={() => setError(true)}

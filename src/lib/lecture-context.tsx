@@ -2,11 +2,14 @@
 
 import { clearChat } from "@/lib/ask/chat";
 import { clearLectureContext } from "@/lib/ask/lectureContext";
+import { stableLectureId } from "@/lib/share";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 export interface Lecture {
-  /** Unique per upload. Everything derived from this lecture is tied to it. */
+  /** Stable for the same video file, so share links keep working after a re-upload. */
   id: string;
+  /** Unique per upload (even of the same video): used to reset the workspace. */
+  session: string;
   courseName: string;
   video: File;
   /** Browser-only blob URL. Never leaves the device. */
@@ -17,7 +20,8 @@ export interface Lecture {
 
 interface LectureContextValue {
   lecture: Lecture | null;
-  setLecture: (input: { courseName: string; video: File; slides: File[] }) => void;
+  /** Resolves with the lecture id. */
+  setLecture: (input: { courseName: string; video: File; slides: File[] }) => Promise<string>;
   clearLecture: () => void;
 }
 
@@ -43,13 +47,14 @@ export function LectureProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const setLecture = useCallback<LectureContextValue["setLecture"]>((input) => {
+  const setLecture = useCallback<LectureContextValue["setLecture"]>(async (input) => {
+    const id = await stableLectureId(input.video);
     release();
     const videoUrl = URL.createObjectURL(input.video);
     urlRef.current = videoUrl;
-    const id = crypto.randomUUID();
     idRef.current = id;
-    setLectureState({ ...input, id, courseName: input.courseName.trim(), videoUrl });
+    setLectureState({ ...input, id, session: crypto.randomUUID(), courseName: input.courseName.trim(), videoUrl });
+    return id;
   }, []);
 
   const clearLecture = useCallback(() => {

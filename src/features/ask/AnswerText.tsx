@@ -1,6 +1,7 @@
 "use client";
 
 import { parseAnswer } from "@/lib/ask/citations";
+import { ShareIcon } from "@/components/ui/Icons";
 import type { AskSource } from "@/lib/ai/contracts";
 import type { ChatPart, SourceRef } from "@/lib/ask/chat";
 
@@ -11,24 +12,43 @@ const chip =
 export function SourceChip({
   source,
   onSeek,
+  onShare,
+  question,
   srPrefix = true,
 }: {
   source: SourceRef;
   onSeek: (seconds: number) => void;
+  /** Adds a small share icon next to a timestamp. */
+  onShare?: (seconds: number, question?: string) => void;
+  /** The student's question, carried in the shared link. */
+  question?: string;
   /** Say "Source:" to screen readers (not needed inside a list already titled "Sources"). */
   srPrefix?: boolean;
 }) {
   if (source.kind === "transcript" && source.start !== undefined) {
     return (
-      <button
-        type="button"
-        onClick={() => onSeek(source.start! + 0.01)}
-        aria-label={`Jump to ${source.label} in the video`}
-        title={`Jump to ${source.label}: ${source.snippet}`}
-        className={`${chip} border-accent/40 bg-accent-soft text-accent transition-colors hover:bg-accent/30`}
-      >
-        {source.label}
-      </button>
+      <span className="inline-flex items-center align-baseline">
+        <button
+          type="button"
+          onClick={() => onSeek(source.start! + 0.01)}
+          aria-label={`Jump to ${source.label} in the video`}
+          title={`Jump to ${source.label}: ${source.snippet}`}
+          className={`${chip} border-accent/40 bg-accent-soft text-accent transition-colors hover:bg-accent/30`}
+        >
+          {source.label}
+        </button>
+        {onShare && (
+          <button
+            type="button"
+            onClick={() => onShare(source.start!, question)}
+            aria-label={`Copy a link to ${source.label}`}
+            title="Copy link to this moment"
+            className="-ml-0.5 mr-0.5 grid h-5 w-5 place-items-center rounded-md text-muted transition-colors hover:bg-white/10 hover:text-ink"
+          >
+            <ShareIcon width={12} height={12} />
+          </button>
+        )}
+      </span>
     );
   }
   return (
@@ -60,10 +80,14 @@ export function AnswerText({
   part,
   refs,
   onSeek,
+  onShare,
+  question,
 }: {
   part: ChatPart;
   refs: Record<string, SourceRef>;
   onSeek: (seconds: number) => void;
+  onShare?: (seconds: number, question?: string) => void;
+  question?: string;
 }) {
   const segments = parseAnswer(part.text, new Set(Object.keys(refs)), false);
   const inline = new Set(segments.flatMap((s) => (s.kind === "cite" ? s.ids : [])));
@@ -77,13 +101,13 @@ export function AnswerText({
         ) : (
           <span key={i}>
             {s.ids.map((id) => (
-              <SourceChip key={id} source={refs[id]} onSeek={onSeek} />
+              <SourceChip key={id} source={refs[id]} onSeek={onSeek} onShare={onShare} question={question} />
             ))}
           </span>
         ),
       )}
       {rest.map((id) => (
-        <SourceChip key={id} source={refs[id]} onSeek={onSeek} />
+        <SourceChip key={id} source={refs[id]} onSeek={onSeek} onShare={onShare} question={question} />
       ))}
     </p>
   );
