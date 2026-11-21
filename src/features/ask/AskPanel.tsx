@@ -6,6 +6,7 @@ import { clearChat, retryQuestion, sendQuestion, type ChatMessage } from "@/lib/
 import { parseAnswer } from "@/lib/ask/citations";
 import { prepareLecture } from "@/lib/ask/lectureContext";
 import { AnswerText, SourceBadge } from "./AnswerText";
+import { ProfessorPanel } from "./ProfessorPanel";
 import { useAskChat } from "./useAskChat";
 
 const MAX_QUESTION = 500;
@@ -52,6 +53,7 @@ export function AskPanel({ uploadId, courseName, onSeek, onShare }: Props) {
   const { messages, asking } = useAskChat(uploadId);
   const [draft, setDraft] = useState("");
   const [announce, setAnnounce] = useState("");
+  const [professorFor, setProfessorFor] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const announced = useRef<string | null>(null);
@@ -204,6 +206,24 @@ export function AskPanel({ uploadId, courseName, onSeek, onShare }: Props) {
                       </div>
                     ))}
                   </div>
+                )}
+                {m.status === "done" && (m.parts?.length ?? 0) > 0 && (
+                  professorFor === m.id ? (
+                    <ProfessorPanel
+                      lectureId={uploadId}
+                      title={courseName}
+                      message={m}
+                      onClose={() => setProfessorFor(null)}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setProfessorFor(m.id)}
+                      className="mt-2 text-xs text-muted underline-offset-2 transition-colors hover:text-ink hover:underline"
+                    >
+                      Still confused? Ask my professor
+                    </button>
+                  )
                 )}
               </article>
             </li>

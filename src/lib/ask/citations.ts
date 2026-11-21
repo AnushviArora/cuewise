@@ -71,3 +71,19 @@ export function checkParts(parts: AskPart[], sent: Set<string>, answering: Set<s
   }
   return out;
 }
+
+/**
+ * File name for a citation chip. Drops a leading ID prefix (a long hex string some download
+ * sites add, like "ba2947b25b3d..._"), then shortens the middle so the end and extension stay.
+ */
+export function displayFileName(name: string, max = 30): string {
+  const clean = name.replace(/^[0-9a-f]{12,}[_\- ]+(?=\S)/i, "") || name;
+  if (clean.length <= max) return clean;
+  const dot = clean.lastIndexOf(".");
+  const ext = dot > 0 && clean.length - dot <= 6 ? clean.slice(dot) : "";
+  const stem = clean.slice(0, clean.length - ext.length);
+  const keep = max - ext.length - 1;
+  const head = Math.ceil(keep * 0.6);
+  const tail = keep - head;
+  return `${stem.slice(0, head)}…${tail > 0 ? stem.slice(-tail) : ""}${ext}`;
+}

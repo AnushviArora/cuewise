@@ -1,6 +1,6 @@
 import { ApiRequestError, askLecture, embedTexts } from "@/lib/ai/client";
 import type { AskRequest, AskSource } from "@/lib/ai/contracts";
-import { checkParts } from "./citations";
+import { checkParts, displayFileName } from "./citations";
 import { getLectureContext } from "./lectureContext";
 import { retrieve } from "./retrieve";
 
@@ -111,7 +111,6 @@ async function execute(
       history: priorDone.slice(-HISTORY_TURNS * 2).map((m) => ({ role: m.role, content: m.text })),
       excerpts: sent.map((c) => ({ id: c.id, label: c.label, text: c.text, related: near.includes(c) || undefined })),
     };
-    const shortName = (n: string) => (n.length > 28 ? `${n.slice(0, 25)}…` : n);
     const snip = (t: string) => (t.length > 140 ? `${t.slice(0, 137).trimEnd()}…` : t);
     const toRef = (c: (typeof sent)[number]): SourceRef =>
       c.kind === "transcript"
@@ -120,7 +119,7 @@ async function execute(
             id: c.id,
             kind: "slide",
             // Always name the file, plus its slide / section / lines / page.
-            label: `${shortName(c.doc ?? "")} · ${c.locator ?? `page ${c.page}`}`,
+            label: `${displayFileName(c.doc ?? "")} · ${c.locator ?? `page ${c.page}`}`,
             title: c.label,
             snippet: snip(c.text),
           };
