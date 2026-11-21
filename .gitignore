@@ -16,3 +16,18 @@ next-env.d.ts
 # misc
 .DS_Store
 npm-debug.log*
+
+# lecture media and uploads — never commit
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+*.m4v
+*.mp3
+*.wav
+*.m4a
+*.pdf
+*.pptx
+*.docx
+/uploads/
